@@ -118,4 +118,16 @@ contract HashedTimelockTest is Test {
         htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
         vm.stopPrank();
     }
+
+    // GRUPO 2 — resgate APÓS o timelock expirar deve reverter (janela fechou).
+    // redeem exige block.timestamp < s.timelock (HashedTimelock.sol:110),
+    // senão reverte TimelockExpired — mesmo com o preimage CORRETO.
+    function test_RedeemAfterTimelock_Reverts() public {
+        vm.prank(sender);
+        bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
+
+        vm.warp(timelock + 1); // janela de resgate fechou
+        vm.expectRevert(HashedTimelock.TimelockExpired.selector);
+        htlc.redeem(id, preimage); // preimage correto, mas tarde demais
+    }
 }

@@ -137,6 +137,11 @@ pub fn verify(o: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyE
         .map_err(|_| VerifyError::BadSignature)?;
     let signer = address_of(&vk);
 
+    // PARIDADE Rust↔Solidity: uma assinatura com r=0 é REJEITADA em ambos (propriedade de segurança intacta).
+    // Os rótulos diferem: Solidity recupera address(0) e reverte ZeroSigner; Rust rejeita antes em
+    // Signature::from_slice e retorna BadSignature. A variante ZeroSigner abaixo é defensiva/inalcançável
+    // com k256 atual. Divergência cosmética, sem efeito de consenso (o que importa: ambos rejeitam).
+    // Ver teste eip712::tests::zero_r_signature_is_rejected.
     if signer == [0u8; 20] {
         return Err(VerifyError::ZeroSigner);
     }
@@ -281,5 +286,91 @@ mod tests {
         let o = vector_order();
         let sig = sign(&o, &pk);
         assert_eq!(verify(&o, &sig, 1_000_000_000), Ok(digest(&o)));
+    }
+
+    // ===== GRUPO 1 — paridade do endurecimento ECDSA (lado Rust) =====
+
+    // ordem completa da curva secp256k1 (n).
+    const SECP256K1_N: [u8; 32] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
+    ];
+
+    // subtração big-endian de 32 bytes (a >= b), usada para s -> n - s.
+    fn sub_be(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        let mut borrow: i16 = 0;
+        for i in (0..32).rev() {
+            let mut diff = a[i] as i16 - b[i] as i16 - borrow;
+            if diff < 0 {
+                diff += 256;
+                borrow = 1;
+            } else {
+                borrow = 0;
+            }
+            out[i] = diff as u8;
+        }
+        out
+    }
+
+    // s alto (maleabilidade): troca s por (n - s) e inverte v; deve dar MalleableS.
+    #[test]
+    fn high_s_rejected() {
+        let o = vector_order();
+        let base = vector_signature(); // r ‖ s(low) ‖ v(28)
+        let mut s = [0u8; 32];
+        s.copy_from_slice(&base[32..64]);
+        let high_s = sub_be(&SECP256K1_N, &s);
+
+        let mut sig = Vec::with_capacity(65);
+        sig.extend_from_slice(&base[0..32]); // r
+        sig.extend_from_slice(&high_s); // s alto
+        sig.push(if base[64] == 27 { 28 } else { 27 }); // v invertido
+
+        assert_eq!(verify(&o, &sig, 1_000_000_000), Err(VerifyError::MalleableS));
+    }
+
+    // v inválido (fora de {27,28}); deve dar InvalidV.
+    #[test]
+    fn invalid_v_rejected() {
+        let o = vector_order();
+        let mut sig = vector_signature();
+        sig[64] = 29; // v inválido
+        assert_eq!(verify(&o, &sig, 1_000_000_000), Err(VerifyError::InvalidV));
+    }
+
+    // comprimento errado (≠ 65); deve dar BadSignatureLength.
+    #[test]
+    fn bad_length_rejected() {
+        let o = vector_order();
+        let short = vec![0u8; 64];
+        assert_eq!(
+            verify(&o, &short, 1_000_000_000),
+            Err(VerifyError::BadSignatureLength)
+        );
+    }
+
+    // r = 0: o ponto do teste é provar que essa assinatura é REJEITADA, não
+    // qual rótulo de erro sai.
+    //
+    // PARIDADE Rust↔Solidity: uma assinatura com r=0 é REJEITADA em ambos (propriedade de segurança intacta).
+    // Os rótulos diferem: Solidity recupera address(0) e reverte ZeroSigner; Rust rejeita antes em
+    // Signature::from_slice e retorna BadSignature. A variante ZeroSigner no Rust é defensiva/inalcançável
+    // com k256 atual. Divergência cosmética, sem efeito de consenso (o que importa: ambos rejeitam).
+    #[test]
+    fn zero_r_signature_is_rejected() {
+        let o = vector_order();
+        let base = vector_signature();
+        let mut sig = Vec::with_capacity(65);
+        sig.extend_from_slice(&[0u8; 32]); // r = 0
+        sig.extend_from_slice(&base[32..64]); // s (low, válido)
+        sig.push(27);
+
+        let result = verify(&o, &sig, 1_000_000_000);
+        // 1) propriedade que importa: r=0 é rejeitado (qualquer Err serve).
+        assert!(result.is_err(), "r=0 deve ser rejeitado, veio: {result:?}");
+        // 2) divergência documentada: no Rust o rótulo é BadSignature (k256 erra
+        //    em Signature::from_slice antes da recuperação), NÃO ZeroSigner.
+        assert_eq!(result, Err(VerifyError::BadSignature));
     }
 }
