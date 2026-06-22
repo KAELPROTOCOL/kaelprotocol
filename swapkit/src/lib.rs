@@ -9,8 +9,11 @@
 //! Sem rede, sem relógio, sem estado: a leitura real da chain virá depois,
 //! atrás de uma interface, e alimentará esta lógica.
 
+pub mod chain;
 pub mod sm;
 pub mod verify;
+
+pub use chain::{observed_from_swap, ChainError, ChainVerifier, RawSwap, RpcVerifier};
 
 pub use sm::{advance, next_action, AbortReason, NextAction, SwapContext, SwapEvent, SwapState};
 pub use verify::{
