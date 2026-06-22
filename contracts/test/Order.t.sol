@@ -106,4 +106,34 @@ contract OrderTest is Test {
         vm.expectRevert(OrderLib.MalleableS.selector);
         h.verify(o, sig, o.validUntil - 1);
     }
+
+    // ===== GRUPO 3 — reverts faltantes da OrderLib =====
+
+    // v fora de {27,28} => InvalidV. (s baixo, passa o check de maleabilidade.)
+    function test_InvalidV_Reverts() public {
+        OrderLib.Order memory o = _order();
+        (, bytes32 r, bytes32 s) = vm.sign(makerPk, h.hash(o));
+        bytes memory sig = abi.encodePacked(r, s, uint8(29)); // v inválido
+        vm.expectRevert(OrderLib.InvalidV.selector);
+        h.verify(o, sig, o.validUntil - 1);
+    }
+
+    // comprimento ≠ 65 => InvalidSignatureLength.
+    function test_InvalidSignatureLength_Reverts() public {
+        OrderLib.Order memory o = _order();
+        (, bytes32 r, bytes32 s) = vm.sign(makerPk, h.hash(o));
+        bytes memory sig = abi.encodePacked(r, s); // 64 bytes
+        vm.expectRevert(OrderLib.InvalidSignatureLength.selector);
+        h.verify(o, sig, o.validUntil - 1);
+    }
+
+    // r = 0 força ecrecover a devolver address(0) => ZeroSigner.
+    // (s baixo e v=27 passam os checks anteriores; o recover é que zera.)
+    function test_ZeroSigner_Reverts() public {
+        OrderLib.Order memory o = _order();
+        (, , bytes32 s) = vm.sign(makerPk, h.hash(o));
+        bytes memory sig = abi.encodePacked(bytes32(0), s, uint8(27)); // r = 0
+        vm.expectRevert(OrderLib.ZeroSigner.selector);
+        h.verify(o, sig, o.validUntil - 1);
+    }
 }
