@@ -1,0 +1,12 @@
+# Rust
+/target
+**/target
+
+# Foundry
+contracts/out
+contracts/cache
+contracts/broadcast
+
+# Misc
+*.log
+.DS_Store
