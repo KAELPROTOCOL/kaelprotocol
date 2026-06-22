@@ -1,0 +1,23 @@
+{
+  "_comment": "Vetor de equivalência EIP-712 gerado por contracts/test/Vector.t.sol. Prova que a verificação em Rust recupera o MESMO maker que o Order.sol. Chave privada fixa apenas para teste — NUNCA usar com fundos reais.",
+  "privateKey": "0x00000000000000000000000000000000000000000000000000000000c0ffee01",
+  "order": {
+    "maker": "0x06884b215DE85bE18f99a04d05108524Edc88d82",
+    "sellToken": "0x1111111111111111111111111111111111111111",
+    "sellChainId": 1,
+    "sellAmount": "1000000000000000000",
+    "buyToken": "0x2222222222222222222222222222222222222222",
+    "buyChainId": 10,
+    "buyAmount": "2000000000",
+    "validUntil": 2000000000,
+    "nonce": 42
+  },
+  "domainSeparator": "0xc420abb1f32a367b5e624c22fe23edff18215146e3e5e59114624452b0296f41",
+  "structHash": "0xbeab77fa79633dfb42b2ea8c42ca94f87a408b3302d76d0418b3adce01bade9d",
+  "digest": "0x6b63f6d4e04665700cac5a401bd965d8ff95b2ee26e0ba8924cd79d57f50e3a1",
+  "signature": {
+    "r": "0x30ce4ef4a9e0ffa123e5bf6e588550416fe77bd947cf2bd8203453591f2ca6ce",
+    "s": "0x22be7efbadb7f464cdaeb3ad68c2ad60d750e7dfe1572f9ea6f4d9ba5520d42e",
+    "v": 28
+  }
+}
