@@ -90,6 +90,12 @@ cd .. && cargo test --workspace
 
 # Marco local de desenvolvimento: dois executores, dois anvils, HTLC direto
 ./scripts/run_dev_swap_test.sh
+
+# Preflight para testnet fechada de desenvolvedores (nao envia transacoes)
+./scripts/run_closed_testnet_preflight.sh
+
+# Swap direto HTLC em testnet fechada (exige confirmacao explicita por env)
+./scripts/run_closed_testnet_swap.sh
 ```
 
 ## Como rodar os serviços
@@ -111,7 +117,10 @@ Honestamente não construídos — têm decisões de fundação a fechar antes d
 
 - **Transporte p2p + integração completa com livro/Settlement** — a costura de
   produto que transforma descoberta de match em swap conduzido ponta a ponta.
-- **Profundidade de confirmação (anti-reorg)** e quórum de nós na leitura de chain.
+- **Execução pública/produção** — há preflight e runner direto HTLC para testnet
+  fechada de desenvolvedores (`docs/CLOSED_TESTNET_RUNBOOK.md`), mas isso não é
+  prontidão para público, mainnet ou fundos reais.
+- **Quórum de nós na leitura de chain.**
 - **Liquidez/makers** — o *free-option problem* e o incentivo de liquidez.
 - **Bitcoin nativo** (a SHA-256 mantém essa porta aberta) e Solana.
 - **Auditoria profissional independente** — inviolável antes de qualquer valor real.

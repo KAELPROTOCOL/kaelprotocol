@@ -16,12 +16,17 @@ Last updated: 2026-06-25
 - Local two-party direct HTLC wallet e2e added.
 - Development test runner added at `scripts/run_dev_swap_test.sh`.
 - Development test runbook added at `docs/DEV_TEST_RUNBOOK.md`.
+- Closed developer testnet preflight added at `scripts/run_closed_testnet_preflight.sh`.
+- Closed developer testnet direct HTLC swap runner added at `scripts/run_closed_testnet_swap.sh`.
+- Closed developer testnet runbook added at `docs/CLOSED_TESTNET_RUNBOOK.md`.
 
 ## Current Milestone
 
 - Peça 5: concluded for local/anvil development scope.
 - Local e2e: concluded for direct HTLC native ETH scope.
 - Development runner: concluded.
+- Closed testnet preflight: concluded for configuration/environment validation.
+- Closed testnet direct HTLC swap runner: concluded for developer-only native ETH HTLC scope.
 
 Expected local command:
 
@@ -35,6 +40,30 @@ Expected success marker:
 Marco de desenvolvimento atingido: swap local rodando pela carteira.
 ```
 
+Expected closed testnet preflight command:
+
+```bash
+./scripts/run_closed_testnet_preflight.sh
+```
+
+Expected preflight marker:
+
+```text
+CLOSED TESTNET PREFLIGHT OK
+```
+
+Expected closed testnet swap command:
+
+```bash
+./scripts/run_closed_testnet_swap.sh
+```
+
+Expected closed testnet swap marker:
+
+```text
+CLOSED TESTNET SWAP OK
+```
+
 ## Audit Findings
 
 - Critical: 0 open.
@@ -44,7 +73,7 @@ Marco de desenvolvimento atingido: swap local rodando pela carteira.
 - Medium: 2 fixed tooling issues, 1 deferred public-network liveness issue.
   - `KAEL-M-001`: `rustfmt` installed and `cargo fmt --all -- --check` passing.
   - `KAEL-M-002`: `clippy` installed and `cargo clippy --workspace --all-targets -- -D warnings` passing.
-  - `KAEL-M-003`: fee/RBF/liveness policy deferred; not needed for local anvil.
+- `KAEL-M-003`: fee/RBF/liveness policy deferred; not needed for local anvil.
 - Low: 1 fixed.
   - `KAEL-L-001`: unused orderbook test helper removed.
 - Informational: 1 fixed.
@@ -75,5 +104,6 @@ cd contracts && forge test
 - Multi-RPC quorum or trustless light-client verification.
 - Persistent crash/restart recovery beyond the simple local executor state.
 - Explicit non-EVM recipient handling before Bitcoin support.
+- Productized closed-testnet flow using p2p/orderbook/Settlement instead of the direct HTLC developer runner.
 
 Rule: no mainnet, no real funds, and no weakening of the testnet/local allowlist.
