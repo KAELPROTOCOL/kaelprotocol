@@ -37,7 +37,49 @@ impl std::fmt::Display for ChainError {
 }
 impl std::error::Error for ChainError {}
 
-/// Interface de leitura de chain. Produz o [`ObservedLock`] que a verificação
+/// Resultado de observar a perna oposta, COM profundidade de confirmação levada
+/// em conta (anti-reorg). Três vias:
+///
+/// - [`Confirmed`](LockObservation::Confirmed): trava ativa E suficientemente
+///   funda (≥ `min_confirmations`). É a ÚNICA via segura para agir.
+/// - [`Shallow`](LockObservation::Shallow): trava ativa, mas RASA — pode ser
+///   revertida por um reorg. NÃO é segura para agir ainda; só esperar mais.
+/// - [`Absent`](LockObservation::Absent): nenhuma trava ativa (inexistente, já
+///   resgatada ou já reembolsada).
+///
+/// SEGURANÇA (G2): tanto `Shallow` quanto `Absent` mapeiam para "não vista" no
+/// gate ([`for_gate`](LockObservation::for_gate) → `None`) — a máquina ESPERA
+/// nos dois casos. A distinção existe só para telemetria/log, NUNCA enfraquece a
+/// decisão.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LockObservation {
+    Confirmed(ObservedLock),
+    Shallow,
+    Absent,
+}
+
+/// Convenção ÚNICA de profundidade: o bloco de inclusão conta como a 1ª
+/// confirmação. `confirmações = head − bloco + 1` (saturando). É usada TANTO na
+/// leitura da perna oposta ([`RpcVerifier::observe_lock`]) QUANTO na confirmação
+/// das minhas próprias txs (`exec::confirm`) — uma só noção de profundidade no
+/// código, nunca duas.
+pub fn confirmations(head: u64, block: u64) -> u64 {
+    head.saturating_sub(block) + 1
+}
+
+impl LockObservation {
+    /// O que o gate/máquina de estados consome. SÓ `Confirmed` vira uma trava
+    /// observada; `Shallow` e `Absent` viram `None` (a máquina espera). Esta é a
+    /// fronteira que garante: nunca agir contra uma trava rasa ou ausente.
+    pub fn for_gate(&self) -> Option<ObservedLock> {
+        match self {
+            LockObservation::Confirmed(o) => Some(*o),
+            LockObservation::Shallow | LockObservation::Absent => None,
+        }
+    }
+}
+
+/// Interface de leitura de chain. Produz o [`LockObservation`] que a verificação
 /// consome.
 ///
 /// CONFIANÇA: implementações via RPC (como [`RpcVerifier`]) são
@@ -46,14 +88,20 @@ impl std::error::Error for ChainError {}
 /// outra sem mexer no resto da carteira. É a fronteira de confiança do MVP.
 #[allow(async_fn_in_trait)]
 pub trait ChainVerifier {
-    /// Lê a trava HTLC identificada por `contract_id` no contrato `htlc_address`
-    /// da chain alvo. Retorna o [`ObservedLock`] (`exists=false` se não houver
-    /// trava ativa). Erros de leitura viram [`ChainError`].
+    /// Lê a trava HTLC identificada por `contract_id` no contrato `htlc_address`,
+    /// exigindo `min_confirmations` de PROFUNDIDADE (anti-reorg).
+    ///
+    /// Convenção de contagem: o bloco de inclusão conta como a 1ª confirmação, ou
+    /// seja `confirmações = head − bloco_de_criação + 1`. Logo `min_confirmations
+    /// = 1` significa "precisa estar minerada" — equivalente ao comportamento
+    /// antigo (profundidade 0); `min_confirmations = 0` aceita qualquer coisa
+    /// ativa. Erros de leitura viram [`ChainError`].
     async fn observe_lock(
         &self,
         htlc_address: Address,
         contract_id: [u8; 32],
-    ) -> Result<ObservedLock, ChainError>;
+        min_confirmations: u64,
+    ) -> Result<LockObservation, ChainError>;
 }
 
 /// Espelho da struct `Swap` do HashedTimelock, já decodificada para tipos Rust.
@@ -97,9 +145,14 @@ pub fn observed_from_swap(s: &RawSwap) -> ObservedLock {
 
 use alloy::primitives::{Address as EvmAddress, B256, U256};
 use alloy::providers::{DynProvider, Provider, ProviderBuilder};
+use alloy::rpc::types::Filter;
 use alloy::sol;
+use alloy::sol_types::SolEvent;
 
-// Interface mínima do HashedTimelock para LER a trava (só a view getSwap).
+// Interface mínima do HashedTimelock para LER a trava: a view getSwap (parâmetros
+// atuais) + o evento LogNewSwap (bloco de criação, p/ medir profundidade). A
+// assinatura do evento DEVE ser idêntica à do contrato — o SIGNATURE_HASH é o
+// que filtra o log certo.
 sol! {
     #[sol(rpc)]
     interface IHashedTimelock {
@@ -113,6 +166,15 @@ sol! {
             bool withdrawn;
             bool refunded;
         }
+        event LogNewSwap(
+            bytes32 indexed contractId,
+            address indexed sender,
+            address indexed recipient,
+            address token,
+            uint256 amount,
+            bytes32 hashlock,
+            uint256 timelock
+        );
         function getSwap(bytes32 contractId) external view returns (Swap memory);
     }
 }
@@ -143,12 +205,39 @@ fn u256_to_u64(v: U256) -> Result<u64, ChainError> {
     u64::try_from(v).map_err(|_| ChainError::TimelockOverflow)
 }
 
+impl RpcVerifier {
+    /// Bloco em que a trava `contract_id` foi CRIADA, lido do `LogNewSwap`
+    /// (filtrado pelo `contractId` indexado). `None` se nenhum log for achado.
+    ///
+    /// MVP: varre de 0 até head a cada chamada — barato em anvil/teste, e o filtro
+    /// é por tópico indexado (o nó não devolve o histórico inteiro). Em produção,
+    /// rastrear a partir de um checkpoint evita a varredura completa.
+    async fn creation_block(
+        &self,
+        htlc_address: Address,
+        contract_id: [u8; 32],
+    ) -> Result<Option<u64>, ChainError> {
+        let filter = Filter::new()
+            .address(EvmAddress::from(htlc_address))
+            .event_signature(IHashedTimelock::LogNewSwap::SIGNATURE_HASH)
+            .topic1(B256::from(contract_id))
+            .from_block(0u64);
+        let logs = self
+            .provider
+            .get_logs(&filter)
+            .await
+            .map_err(|e| ChainError::Rpc(format!("{e}")))?;
+        Ok(logs.first().and_then(|l| l.block_number))
+    }
+}
+
 impl ChainVerifier for RpcVerifier {
     async fn observe_lock(
         &self,
         htlc_address: Address,
         contract_id: [u8; 32],
-    ) -> Result<ObservedLock, ChainError> {
+        min_confirmations: u64,
+    ) -> Result<LockObservation, ChainError> {
         let htlc = IHashedTimelock::new(EvmAddress::from(htlc_address), &self.provider);
         let swap = htlc
             .getSwap(B256::from(contract_id))
@@ -166,7 +255,32 @@ impl ChainVerifier for RpcVerifier {
             withdrawn: swap.withdrawn,
             refunded: swap.refunded,
         };
-        Ok(observed_from_swap(&raw))
+        let observed = observed_from_swap(&raw);
+
+        // sem trava ativa (inexistente/resgatada/reembolsada) → Absent, sem checar
+        // profundidade (não há o que confirmar).
+        if !observed.exists {
+            return Ok(LockObservation::Absent);
+        }
+
+        // ativa → mede profundidade. confirmações = head − bloco_criação + 1
+        // (o bloco de inclusão conta como a 1ª). Sem o log de criação, não consigo
+        // PROVAR a profundidade → conservador: 0 confirmações (só passa se min=0).
+        let head = self
+            .provider
+            .get_block_number()
+            .await
+            .map_err(|e| ChainError::Rpc(format!("{e}")))?;
+        let confs = match self.creation_block(htlc_address, contract_id).await? {
+            Some(cb) => confirmations(head, cb),
+            None => 0,
+        };
+
+        if confs >= min_confirmations {
+            Ok(LockObservation::Confirmed(observed))
+        } else {
+            Ok(LockObservation::Shallow)
+        }
     }
 }
 
@@ -300,6 +414,17 @@ mod tests {
         );
     }
 
+    // --- G2: for_gate() — só Confirmed vira trava observada; Shallow e Absent
+    //     viram None (a máquina espera). Garantia de que a distinção rasa/ausente
+    //     é só telemetria e NUNCA enfraquece o gate. ---
+    #[test]
+    fn for_gate_only_confirmed_is_observed() {
+        let o = observed_from_swap(&active_swap());
+        assert_eq!(LockObservation::Confirmed(o).for_gate(), Some(o));
+        assert_eq!(LockObservation::Shallow.for_gate(), None);
+        assert_eq!(LockObservation::Absent.for_gate(), None);
+    }
+
     // ----------------------------------------------------------------
     // INTEGRAÇÃO REAL contra uma chain (anvil). Antes era um stub #[ignore]:
     // os testes acima provam o PARSING/MONTAGEM, mas NÃO a leitura real de um nó.
@@ -373,7 +498,12 @@ mod tests {
         // === LEITURA REAL via RpcVerifier (o que o #[ignore] nunca provava) ===
         let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
         let htlc_addr: Address = (*htlc.address()).into_array();
-        let obs = v.observe_lock(htlc_addr, cid.0).await.unwrap();
+        // min_confirmations = 1: recém-minerada conta como 1 confirmação →
+        // Confirmed (equivalente ao comportamento antigo de profundidade 0).
+        let obs = match v.observe_lock(htlc_addr, cid.0, 1).await.unwrap() {
+            LockObservation::Confirmed(o) => o,
+            other => panic!("esperava Confirmed da chain real, veio {other:?}"),
+        };
 
         assert!(obs.exists, "trava ativa lida da chain real");
         assert_eq!(obs.hashlock, hashlock);
@@ -420,12 +550,98 @@ mod tests {
             "a leitura real, verificada Safe, leva o taker a resgatar"
         );
 
-        // === negativo: um contractId inexistente lê como exists=false ===
-        let absent = v.observe_lock(htlc_addr, [0xFFu8; 32]).await.unwrap();
-        assert!(!absent.exists, "trava inexistente → exists=false");
+        // === negativo: um contractId inexistente lê como Absent ===
+        let absent = v.observe_lock(htlc_addr, [0xFFu8; 32], 1).await.unwrap();
+        assert_eq!(absent, LockObservation::Absent, "trava inexistente → Absent");
+        // e Absent vira None no gate → a máquina ESPERA (não há trava a verificar).
+        // (que um ObservedLock inexistente verifica como LockNotFound continua
+        // coberto pelo teste puro `withdrawn_lock_verifies_as_lock_not_found`.)
+        assert_eq!(absent.for_gate(), None);
+    }
+
+    // ----------------------------------------------------------------
+    // PROFUNDIDADE (F4) contra anvil real: a MESMA trava lê como Shallow quando a
+    // profundidade exigida é maior que a disponível, e vira Confirmed quando a
+    // chain avança. Prova que o gate de N-confirmações funciona e se MOVE.
+    // ----------------------------------------------------------------
+    #[tokio::test]
+    async fn observe_lock_depth_gate_shallow_then_confirmed() {
+        use alloy::rpc::types::TransactionRequest;
+
+        let anvil = Anvil::new().spawn(); // chain-id default 31337
+        let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
+        let sender = signer.address();
+        let wallet = EthereumWallet::from(signer);
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect_http(anvil.endpoint_url());
+
+        let htlc = HashedTimelock::deploy(provider.clone()).await.unwrap();
+        let me = [0x7Au8; 20];
+        let amount: u128 = 500;
+        let preimage = [0x42u8; 32];
+        let hashlock = hashlock_from_preimage(&preimage);
+        let timelock = now_unix() + 3600;
+
+        htlc.newSwap(
+            EvmAddr::from(me),
+            EvmAddr::ZERO,
+            U256::from(amount),
+            B256::from(hashlock),
+            U256::from(timelock),
+        )
+        .value(U256::from(amount))
+        .send()
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
+
+        let cid: B256 = htlc
+            .computeContractId(
+                sender,
+                EvmAddr::from(me),
+                EvmAddr::ZERO,
+                U256::from(amount),
+                B256::from(hashlock),
+                U256::from(timelock),
+            )
+            .call()
+            .await
+            .unwrap();
+
+        let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
+        let htlc_addr: Address = (*htlc.address()).into_array();
+
+        // recém-minerada = 1 confirmação.
+        // min=0 e min=1 → Confirmed (equivalente ao comportamento antigo).
+        assert!(matches!(
+            v.observe_lock(htlc_addr, cid.0, 0).await.unwrap(),
+            LockObservation::Confirmed(_)
+        ));
+        assert!(matches!(
+            v.observe_lock(htlc_addr, cid.0, 1).await.unwrap(),
+            LockObservation::Confirmed(_)
+        ));
+        // min=2 → ainda RASA (só 1 confirmação disponível).
         assert_eq!(
-            verify_counterparty_leg(&exp, &absent),
-            VerifyOutcome::Unsafe(UnsafeReason::LockNotFound)
+            v.observe_lock(htlc_addr, cid.0, 2).await.unwrap(),
+            LockObservation::Shallow,
+            "1 confirmação < 2 exigidas → Shallow"
+        );
+
+        // minera 1 bloco (auto-transferência) → 2 confirmações.
+        let bump = TransactionRequest::default().to(sender).value(U256::from(0));
+        provider.send_transaction(bump).await.unwrap().get_receipt().await.unwrap();
+
+        // a MESMA trava, agora 2-funda → min=2 vira Confirmed (o gate se moveu).
+        assert!(
+            matches!(
+                v.observe_lock(htlc_addr, cid.0, 2).await.unwrap(),
+                LockObservation::Confirmed(_)
+            ),
+            "após avançar a chain, 2 confirmações ≥ 2 exigidas → Confirmed"
         );
     }
 }

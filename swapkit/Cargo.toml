@@ -21,12 +21,19 @@ alloy = { version = "1.0", features = [
     "rpc-types-eth",
     "network",
     "reqwest",
+    # Assinatura local (secp256k1) — o executor assina tx de lock/redeem/refund.
+    # Era só dev-dependency (testes anvil); o executor é código de produção.
+    "signer-local",
 ] }
+# DESCOBERTA da perna oposta por hashlock (F3): o executor REUSA o SwapTracker e o
+# watcher do maestro tal-e-qual (correlação por hashlock + extração do preimage),
+# em vez de reimplementar. Promovido de dev-dependency para dependency normal —
+# confirmado SEM ciclo (maestro não depende do swapkit).
+maestro = { path = "../maestro" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-# Prova de integração REAL contra anvil: sobe nó, faz deploy do HTLC e cria uma
-# trava de verdade, lida via RpcVerifier. Reusa o binding do HTLC (sol!) e o
-# hashlock do maestro para não duplicar artefato/regra.
-maestro = { path = "../maestro" }
 alloy = { version = "1.0", features = ["node-bindings", "signer-local"] }
+# Viagem no tempo do anvil (evm_increaseTime/evm_mine via raw_request) para provar
+# o refund real APÓS expiração do timelock — o caminho de SEGURANÇA do protocolo.
+serde_json = "1"
