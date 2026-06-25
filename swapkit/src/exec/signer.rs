@@ -30,6 +30,7 @@ pub const ENV_KEY: &str = "KAEL_SIGNER_KEY";
 /// teste, adicione o id AQUI, conscientemente.
 pub const ALLOWED_TEST_CHAINS: &[u64] = &[
     31337,    // anvil / hardhat (default)
+    31338,    // second local anvil for closed developer testnet
     1337,     // geth/ganache --dev
     11155111, // Sepolia
     17000,    // Holesky
@@ -173,6 +174,7 @@ mod tests {
     #[test]
     fn allowlist_admits_known_test_chains() {
         assert!(assert_chain_allowed(31337).is_ok()); // anvil
+        assert!(assert_chain_allowed(31338).is_ok()); // second local anvil
         assert!(assert_chain_allowed(11155111).is_ok()); // sepolia
     }
 

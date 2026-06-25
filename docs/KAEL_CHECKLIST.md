@@ -19,6 +19,10 @@ Last updated: 2026-06-25
 - Closed developer testnet preflight added at `scripts/run_closed_testnet_preflight.sh`.
 - Closed developer testnet direct HTLC swap runner added at `scripts/run_closed_testnet_swap.sh`.
 - Closed developer testnet runbook added at `docs/CLOSED_TESTNET_RUNBOOK.md`.
+- Closed developer testnet UX improved:
+  - preflight lists all missing required variables at once;
+  - `.env.closed-testnet.example` documents safe local defaults;
+  - `scripts/run_closed_testnet_local.sh` starts two local anvils, deploys HTLCs, runs preflight, runs swap, and cleans up.
 
 ## Current Milestone
 
@@ -27,6 +31,7 @@ Last updated: 2026-06-25
 - Development runner: concluded.
 - Closed testnet preflight: concluded for configuration/environment validation.
 - Closed testnet direct HTLC swap runner: concluded for developer-only native ETH HTLC scope.
+- Closed local automatic runner: available for two local Anvil chains.
 
 Expected local command:
 
@@ -64,6 +69,18 @@ Expected closed testnet swap marker:
 CLOSED TESTNET SWAP OK
 ```
 
+Expected automatic local closed testnet command:
+
+```bash
+./scripts/run_closed_testnet_local.sh
+```
+
+Expected automatic local closed testnet marker:
+
+```text
+Closed developer testnet swap completed.
+```
+
 ## Audit Findings
 
 - Critical: 0 open.
@@ -85,6 +102,12 @@ Run:
 
 ```bash
 ./scripts/run_dev_swap_test.sh
+```
+
+For the closed developer testnet local path, run:
+
+```bash
+./scripts/run_closed_testnet_local.sh
 ```
 
 For broader validation, run:

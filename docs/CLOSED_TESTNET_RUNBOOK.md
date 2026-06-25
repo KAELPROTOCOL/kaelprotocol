@@ -18,7 +18,7 @@ This runbook is for a closed developer testnet only. It is not production readin
 ./scripts/run_closed_testnet_preflight.sh
 ```
 
-The preflight validates configuration and chain safety. It does not sign or broadcast `lock`, `redeem`, or `refund`.
+The preflight validates configuration and chain safety. It lists all missing required variables at once and prints a local copy/paste example. It does not sign or broadcast `lock`, `redeem`, or `refund`.
 
 ## Closed Testnet Swap Command
 
@@ -35,6 +35,12 @@ export KAEL_CLOSED_TESTNET_SEND_TX=I_UNDERSTAND_THIS_USES_TEST_FUNDS
 ```
 
 ## Required Environment
+
+For local Anvil defaults, start from:
+
+```bash
+cp .env.closed-testnet.example .env.closed-testnet
+```
 
 ```bash
 export KAEL_RPC_A=https://...
@@ -62,6 +68,22 @@ export KAEL_MAKER_LOCK_SECS=3600
 export KAEL_MIN_GAP_SECS=1800
 export KAEL_CLOSED_TESTNET_MAX_STEPS=120
 export KAEL_CLOSED_TESTNET_POLL_SECS=12
+```
+
+## Automatic Local Closed Testnet
+
+For the complete local closed-testnet developer path:
+
+```bash
+./scripts/run_closed_testnet_local.sh
+```
+
+This starts two local Anvil chains (`31337` and `31338`), deploys `HashedTimelock` on both, runs preflight, runs the guarded swap with test funds, writes logs to `/tmp/kael-closed-testnet/`, and cleans up Anvil processes on exit.
+
+Passing output includes:
+
+```text
+Closed developer testnet swap completed.
 ```
 
 ## What Preflight Checks
