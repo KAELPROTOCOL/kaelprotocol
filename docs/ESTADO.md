@@ -69,6 +69,17 @@ Decisões já tomadas, mas ainda sem implementação:
 - **Quórum de nós.** O `RpcVerifier` confia num único nó. Reforço barato antes do
   SPV completo: consultar múltiplos nós e exigir concordância. Decidido como direção;
   **não implementado**.
+- **⚠️ LIVENESS DE TX PERTO DA EXPIRAÇÃO (taxa/RBF) — fora do MVP, OBRIGATÓRIO antes
+  de testnet pública.** Uma transação **subprecificada** (resgate ou reembolso) pode
+  ficar **presa na mempool** e não minerar a tempo. Se isso acontece **perto da
+  expiração do timelock**, a parte **perde a janela de resgate** — risco de liveness
+  REAL, com perda de fundos como consequência (a contraparte reembolsa; eu fico sem o
+  resgate). O executor do MVP usa estimativa de gás default do nó, **sem
+  replace-by-fee**, **sem retentativa com bump de taxa** — aceitável **só em anvil**
+  (mineração determinística, sem mempool competitiva). Para qualquer chain pública,
+  uma **política de taxa + RBF** (bump progressivo até minerar, com margem antes da
+  expiração) é **necessária, não opcional**. Decidido como direção; **não
+  implementado** e **não pode ir a testnet pública sem isso**.
 - **Acoplamento de fundação a calibrar por chain.** `min_gap` (gap de timelock),
   **profundidade de confirmação** e **tempo de bloco da chain** são **acoplados**: o
   gap seguro depende de quantos blocos/quanto tempo a parte precisa para agir após a
