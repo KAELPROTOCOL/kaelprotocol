@@ -41,9 +41,9 @@ Marco de desenvolvimento atingido: swap local rodando pela carteira.
 - High: 2 fixed.
   - `KAEL-H-001`: executor loop missing.
   - `KAEL-H-002`: local two-party wallet-led e2e missing.
-- Medium: 2 open tooling issues, 1 deferred public-network liveness issue.
-  - `KAEL-M-001`: `rustfmt` missing in current environment.
-  - `KAEL-M-002`: `clippy` missing in current environment.
+- Medium: 2 fixed tooling issues, 1 deferred public-network liveness issue.
+  - `KAEL-M-001`: `rustfmt` installed and `cargo fmt --all -- --check` passing.
+  - `KAEL-M-002`: `clippy` installed and `cargo clippy --workspace --all-targets -- -D warnings` passing.
   - `KAEL-M-003`: fee/RBF/liveness policy deferred; not needed for local anvil.
 - Low: 1 fixed.
   - `KAEL-L-001`: unused orderbook test helper removed.
@@ -58,7 +58,7 @@ Run:
 ./scripts/run_dev_swap_test.sh
 ```
 
-Then, for broader validation in an environment with full Rust components installed, run:
+For broader validation, run:
 
 ```bash
 cargo fmt --all

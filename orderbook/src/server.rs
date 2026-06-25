@@ -40,7 +40,10 @@ impl Default for AppState {
 }
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 /// Sobe o servidor numa porta efêmera (127.0.0.1:0) e devolve a base URL.
@@ -76,8 +79,12 @@ async fn submit_order(
         .order
         .into_order(now)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("ordem inválida: {e:?}")))?;
-    let sig = wire::parse_signature(&req.signature)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("assinatura inválida: {e:?}")))?;
+    let sig = wire::parse_signature(&req.signature).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("assinatura inválida: {e:?}"),
+        )
+    })?;
 
     let mut book = st.book.write().await;
     match book.submit(order, &sig, now) {

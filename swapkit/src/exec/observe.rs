@@ -95,7 +95,11 @@ impl<V: ChainVerifier> CounterpartyObserver<V> {
     ) -> Result<LockObservation, ChainError> {
         self.poll().await?;
         match self.discover_contract_id(hashlock) {
-            Some(cid) => self.verifier.observe_lock(self.cp_htlc, cid, min_confirmations).await,
+            Some(cid) => {
+                self.verifier
+                    .observe_lock(self.cp_htlc, cid, min_confirmations)
+                    .await
+            }
             None => Ok(LockObservation::Absent),
         }
     }
@@ -121,13 +125,22 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn now_unix() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
     }
 
     // Sobe anvil + carteira, faz deploy do HTLC, e devolve o que os testes precisam.
     // NÃO devolve o binding (o tipo do instance gerado pelo sol! é interno); cada
     // teste reconstrói via `HashedTimelock::new(addr, provider)` (tipo inferido).
-    async fn setup() -> (alloy::node_bindings::AnvilInstance, DynProvider, Address, u64, EvmAddr) {
+    async fn setup() -> (
+        alloy::node_bindings::AnvilInstance,
+        DynProvider,
+        Address,
+        u64,
+        EvmAddr,
+    ) {
         let anvil = Anvil::new().spawn();
         let pk: PrivateKeySigner = anvil.keys()[0].clone().into();
         let sender = pk.address();

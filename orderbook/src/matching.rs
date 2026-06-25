@@ -8,8 +8,11 @@
 //! 2. CRUZAMENTO DE PREÇO sob TRAVA INTEGRAL: cada lado tranca o `sell_amount`
 //!    inteiro; o excedente conta como melhora de preço para a contraparte.
 //!    Cruza quando ambos recebem ao menos o que pediram:
-//!        A.sell_amount >= B.buy_amount   (A entrega X suficiente para B)
-//!        B.sell_amount >= A.buy_amount   (B entrega Y suficiente para A)
+//!
+//!    ```text
+//!    A.sell_amount >= B.buy_amount   (A entrega X suficiente para B)
+//!    B.sell_amount >= A.buy_amount   (B entrega Y suficiente para A)
+//!    ```
 //! 3. SEM PREENCHIMENTO PARCIAL: não dividimos ordens; cada lado compromete
 //!    o sell_amount inteiro. (fill parcial é peça futura com fundação própria.)
 //! 4. PRIORIDADE PRICE-TIME (neutra): melhor preço para o taker primeiro;

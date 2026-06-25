@@ -28,8 +28,8 @@ Baseline contract and Rust tests pass. The main blocker is not an existing broke
 | `pwd && whoami && git branch --show-current && git status --short && git log --oneline -5` | Pass | Environment confirmed. |
 | `rg --files` | Pass | Structure mapped. |
 | `cargo test --workspace` | Pass | 99 Rust tests passed after executor/e2e implementation. |
-| `cargo fmt --all -- --check` | Blocked | `cargo-fmt` is not installed for `stable-x86_64-unknown-linux-gnu`. |
-| `cargo clippy --workspace --all-targets -- -D warnings` | Blocked | `cargo-clippy` is not installed for `stable-x86_64-unknown-linux-gnu`. |
+| `cargo fmt --all -- --check` | Pass | `rustfmt` installed and formatting applied. |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Pass | `clippy` installed; warnings fixed. |
 | `cd contracts && forge test` | Pass | 36 Foundry tests passed. |
 
 ## Components Audited
@@ -57,7 +57,7 @@ No Critical findings are open from the audited code paths. Existing gates preven
 - Evidence: `swapkit/src/exec/mod.rs` only declares submodules and documents piece 5 as pending.
 - Test: Absent before this review.
 - Recommendation: Implement `Clock`, `step()`, `run()`, idempotent state advancement, and anti-TOCTOU re-verification before lock/redeem.
-- Status: open
+- Status: fixed
 
 #### KAEL-H-002: No local two-party wallet-led HTLC e2e
 
@@ -72,27 +72,27 @@ No Critical findings are open from the audited code paths. Existing gates preven
 
 ### Medium
 
-#### KAEL-M-001: `cargo fmt` unavailable in current environment
+#### KAEL-M-001: `cargo fmt` was unavailable in current environment
 
 - Severity: Medium
 - Component: Tooling
-- Description: `cargo fmt --all -- --check` cannot run because the Rust toolchain lacks `rustfmt`.
-- Impact: Formatting validation is blocked in this environment.
-- Evidence: `error: 'cargo-fmt' is not installed for the toolchain 'stable-x86_64-unknown-linux-gnu'`.
-- Test: N/A.
-- Recommendation: Install with `rustup component add rustfmt`; document the validation limitation.
+- Description: Baseline formatting validation was blocked because the Rust toolchain lacked `rustfmt`.
+- Impact: Formatting validation was initially blocked in this environment.
+- Evidence: `rustup component add rustfmt clippy` installed the missing component; `cargo fmt --all -- --check` now passes.
+- Test: `cargo fmt --all -- --check`.
+- Recommendation: Keep `rustfmt` installed in the active toolchain.
 - Status: fixed
 
-#### KAEL-M-002: `cargo clippy` unavailable in current environment
+#### KAEL-M-002: `cargo clippy` was unavailable in current environment
 
 - Severity: Medium
 - Component: Tooling
-- Description: `cargo clippy --workspace --all-targets -- -D warnings` cannot run because the Rust toolchain lacks `clippy`.
-- Impact: Lint validation is blocked in this environment.
-- Evidence: `error: 'cargo-clippy' is not installed for the toolchain 'stable-x86_64-unknown-linux-gnu'`.
-- Test: N/A.
-- Recommendation: Install with `rustup component add clippy`; document the validation limitation.
-- Status: open
+- Description: Baseline lint validation was blocked because the Rust toolchain lacked `clippy`.
+- Impact: Lint validation was initially blocked in this environment.
+- Evidence: `rustup component add rustfmt clippy` installed the missing component; `cargo clippy --workspace --all-targets -- -D warnings` now passes.
+- Test: `cargo clippy --workspace --all-targets -- -D warnings`.
+- Recommendation: Keep `clippy` installed in the active toolchain.
+- Status: fixed
 
 #### KAEL-M-003: Public-network liveness policy is intentionally absent
 
@@ -114,9 +114,9 @@ No Critical findings are open from the audited code paths. Existing gates preven
 - Description: `addr_hex` is unused and produces a warning during `cargo test`.
 - Impact: Non-blocking for the development test, but would be promoted under stricter warning policy.
 - Evidence: `warning: function addr_hex is never used`.
-- Test: Existing test still passes.
+- Test: `cargo clippy --workspace --all-targets -- -D warnings`.
 - Recommendation: Remove the unused helper when touching that test area.
-- Status: open
+- Status: fixed
 
 ### Informational
 
@@ -147,7 +147,7 @@ No Critical findings are open from the audited code paths. Existing gates preven
 - Missing executor loop: fixed.
 - Missing local two-party executor e2e: fixed.
 - Missing one-command runner and runbook: fixed.
-- Missing `rustfmt`/`clippy` components in environment: open tooling blocker, documented; not a protocol blocker.
+- Missing `rustfmt`/`clippy` components in environment: fixed; both validation commands now pass.
 
 ## Correction Plan
 

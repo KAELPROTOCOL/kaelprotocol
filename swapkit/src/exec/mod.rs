@@ -196,7 +196,13 @@ impl<C: Clock> WalletExecutor<C> {
                 self.state = advance(self.state, SwapEvent::SecretGenerated);
                 Ok(StepOutcome::GeneratedSecret)
             }
-            NextAction::LockMyLeg { recipient, token, amount, hashlock, timelock } => {
+            NextAction::LockMyLeg {
+                recipient,
+                token,
+                amount,
+                hashlock,
+                timelock,
+            } => {
                 let current = self.reverified_action().await?;
                 if !reverified_action_matches(&planned, &current) {
                     return Ok(StepOutcome::Waiting);
@@ -219,7 +225,9 @@ impl<C: Clock> WalletExecutor<C> {
                 self.own_contract_id = Some(locked.contract_id);
                 self.ctx.my_leg_locked = true;
                 self.state = advance(self.state, SwapEvent::MyLegConfirmed);
-                Ok(StepOutcome::LockedMyLeg { contract_id: locked.contract_id })
+                Ok(StepOutcome::LockedMyLeg {
+                    contract_id: locked.contract_id,
+                })
             }
             NextAction::RedeemCounterpartyLeg { secret } => {
                 let current = self.reverified_action().await?;
@@ -229,7 +237,13 @@ impl<C: Clock> WalletExecutor<C> {
                 let cid = self
                     .counterparty_contract_id
                     .ok_or(ExecutorError::MissingCounterpartyContractId)?;
-                tx::redeem(&self.counterparty_signer, self.counterparty_htlc, cid, secret).await?;
+                tx::redeem(
+                    &self.counterparty_signer,
+                    self.counterparty_htlc,
+                    cid,
+                    secret,
+                )
+                .await?;
                 if self.state == SwapState::WaitingForSecret {
                     self.state = advance(self.state, SwapEvent::SecretObserved);
                 }
@@ -240,7 +254,9 @@ impl<C: Clock> WalletExecutor<C> {
                 if self.ctx.now < self.ctx.my_timelock {
                     return Ok(StepOutcome::Waiting);
                 }
-                let cid = self.own_contract_id.ok_or(ExecutorError::MissingOwnContractId)?;
+                let cid = self
+                    .own_contract_id
+                    .ok_or(ExecutorError::MissingOwnContractId)?;
                 tx::refund(&self.own_signer, self.own_htlc, cid).await?;
                 self.state = advance(SwapState::Refunding, SwapEvent::RefundConfirmed);
                 Ok(StepOutcome::RefundedMyLeg)
@@ -283,15 +299,24 @@ pub fn rpc_observer(
 ) -> Result<CounterpartyObserver<RpcVerifier>, ChainError> {
     let verifier = RpcVerifier::new(rpc_url)?;
     let provider = ProviderBuilder::new()
-        .connect_http(rpc_url.parse().map_err(|e| ChainError::BadUrl(format!("{e}")))?)
+        .connect_http(
+            rpc_url
+                .parse()
+                .map_err(|e| ChainError::BadUrl(format!("{e}")))?,
+        )
         .erased();
-    Ok(CounterpartyObserver::new(verifier, provider, htlc, chain_id))
+    Ok(CounterpartyObserver::new(
+        verifier, provider, htlc, chain_id,
+    ))
 }
 
 fn is_terminal(state: &SwapState) -> bool {
     matches!(
         state,
-        SwapState::Done | SwapState::Refunded | SwapState::CounterpartyRedeemed | SwapState::Aborted(_)
+        SwapState::Done
+            | SwapState::Refunded
+            | SwapState::CounterpartyRedeemed
+            | SwapState::Aborted(_)
     )
 }
 
@@ -342,10 +367,8 @@ mod tests {
     use maestro::watcher::HashedTimelock;
     use std::sync::{Arc, Mutex};
 
-    const ANVIL_KEY0: &str =
-        "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-    const ANVIL_KEY1: &str =
-        "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+    const ANVIL_KEY0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+    const ANVIL_KEY1: &str = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
     #[derive(Clone)]
     struct FakeClock(Arc<Mutex<u64>>);
@@ -399,38 +422,54 @@ mod tests {
     async fn deploy_htlc(rpc: &str, key: &str) -> (Address, u64) {
         let pk: PrivateKeySigner = format!("0x{key}").parse().unwrap();
         let wallet = EthereumWallet::from(pk);
-        let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc.parse().unwrap());
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect_http(rpc.parse().unwrap());
         let htlc = HashedTimelock::deploy(provider.clone()).await.unwrap();
         let chain_id = provider.get_chain_id().await.unwrap();
         ((*htlc.address()).into_array(), chain_id)
     }
 
-    async fn executor(
+    struct ExecutorFixture<'a> {
         state: SwapState,
         ctx: SwapContext,
-        own_key: &str,
-        cp_key: &str,
-        own_rpc: &str,
-        cp_rpc: &str,
+        own_key: &'a str,
+        cp_key: &'a str,
+        own_rpc: &'a str,
+        cp_rpc: &'a str,
         own_htlc: Address,
         cp_htlc: Address,
         own_chain_id: u64,
         cp_chain_id: u64,
         clock: FakeClock,
-    ) -> WalletExecutor<FakeClock> {
-        let own_signer = Signer::from_key_str(own_key, own_rpc).await.unwrap();
-        let counterparty_signer = Signer::from_key_str(own_key, cp_rpc).await.unwrap();
-        let _cp_signer_sanity = Signer::from_key_str(cp_key, cp_rpc).await.unwrap();
+    }
+
+    async fn executor(fixture: ExecutorFixture<'_>) -> WalletExecutor<FakeClock> {
+        let own_signer = Signer::from_key_str(fixture.own_key, fixture.own_rpc)
+            .await
+            .unwrap();
+        let counterparty_signer = Signer::from_key_str(fixture.own_key, fixture.cp_rpc)
+            .await
+            .unwrap();
+        let _cp_signer_sanity = Signer::from_key_str(fixture.cp_key, fixture.cp_rpc)
+            .await
+            .unwrap();
         WalletExecutor::new(WalletExecutorConfig {
-            state,
-            ctx,
+            state: fixture.state,
+            ctx: fixture.ctx,
             own_signer,
             counterparty_signer,
-            own_htlc,
-            counterparty_htlc: cp_htlc,
-            own_observer: rpc_observer(own_rpc, own_htlc, own_chain_id).unwrap(),
-            counterparty_observer: rpc_observer(cp_rpc, cp_htlc, cp_chain_id).unwrap(),
-            clock,
+            own_htlc: fixture.own_htlc,
+            counterparty_htlc: fixture.cp_htlc,
+            own_observer: rpc_observer(fixture.own_rpc, fixture.own_htlc, fixture.own_chain_id)
+                .unwrap(),
+            counterparty_observer: rpc_observer(
+                fixture.cp_rpc,
+                fixture.cp_htlc,
+                fixture.cp_chain_id,
+            )
+            .unwrap(),
+            clock: fixture.clock,
             min_confirmations: 1,
         })
     }
@@ -480,33 +519,33 @@ mod tests {
         let taker_ctx = ctx(Role::Taker, taker, maker, Some(secret), hashlock, now);
         let maker_ctx = ctx(Role::Maker, maker, taker, None, hashlock, now);
 
-        let mut taker_exec = executor(
-            SwapState::SecretGenerated,
-            taker_ctx,
-            ANVIL_KEY0,
-            ANVIL_KEY1,
-            &rpc_a,
-            &rpc_b,
-            htlc_a,
-            htlc_b,
-            chain_a,
-            chain_b,
-            clock.clone(),
-        )
+        let mut taker_exec = executor(ExecutorFixture {
+            state: SwapState::SecretGenerated,
+            ctx: taker_ctx,
+            own_key: ANVIL_KEY0,
+            cp_key: ANVIL_KEY1,
+            own_rpc: &rpc_a,
+            cp_rpc: &rpc_b,
+            own_htlc: htlc_a,
+            cp_htlc: htlc_b,
+            own_chain_id: chain_a,
+            cp_chain_id: chain_b,
+            clock: clock.clone(),
+        })
         .await;
-        let mut maker_exec = executor(
-            SwapState::Start,
-            maker_ctx,
-            ANVIL_KEY1,
-            ANVIL_KEY0,
-            &rpc_b,
-            &rpc_a,
-            htlc_b,
-            htlc_a,
-            chain_b,
-            chain_a,
-            clock.clone(),
-        )
+        let mut maker_exec = executor(ExecutorFixture {
+            state: SwapState::Start,
+            ctx: maker_ctx,
+            own_key: ANVIL_KEY1,
+            cp_key: ANVIL_KEY0,
+            own_rpc: &rpc_b,
+            cp_rpc: &rpc_a,
+            own_htlc: htlc_b,
+            cp_htlc: htlc_a,
+            own_chain_id: chain_b,
+            cp_chain_id: chain_a,
+            clock: clock.clone(),
+        })
         .await;
 
         assert!(matches!(
@@ -578,19 +617,19 @@ mod tests {
         );
         taker_ctx.my_timelock = now + 30;
 
-        let mut taker_exec = executor(
-            SwapState::SecretGenerated,
-            taker_ctx,
-            ANVIL_KEY0,
-            ANVIL_KEY1,
-            &rpc_a,
-            &rpc_b,
-            htlc_a,
-            htlc_b,
-            chain_a,
-            chain_b,
-            clock.clone(),
-        )
+        let mut taker_exec = executor(ExecutorFixture {
+            state: SwapState::SecretGenerated,
+            ctx: taker_ctx,
+            own_key: ANVIL_KEY0,
+            cp_key: ANVIL_KEY1,
+            own_rpc: &rpc_a,
+            cp_rpc: &rpc_b,
+            own_htlc: htlc_a,
+            cp_htlc: htlc_b,
+            own_chain_id: chain_a,
+            cp_chain_id: chain_b,
+            clock: clock.clone(),
+        })
         .await;
 
         assert!(matches!(

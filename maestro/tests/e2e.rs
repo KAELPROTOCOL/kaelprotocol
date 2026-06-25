@@ -5,6 +5,7 @@
 //! em B revela o preimage) e prova que o maestro:
 //!   1. detecta as duas travas e as correlaciona pelo hashlock SHA-256;
 //!   2. captura o preimage revelado.
+//!
 //! Segundo teste: uma perna que expira é apanhada pelo watchdog.
 
 use alloy::network::EthereumWallet;
@@ -18,7 +19,10 @@ use maestro::SwapTracker;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 /// Sobe um anvil com um dado chain_id e devolve (instância, provider-com-wallet,
@@ -56,7 +60,7 @@ async fn cross_chain_swap_is_correlated_and_preimage_captured() {
     let hashlock_b = B256::from(hashlock);
     let preimage_b = B256::from(preimage);
     let amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
-    // timelock longo em A, curto em B (assimetria correta do HTLC)
+                                                            // timelock longo em A, curto em B (assimetria correta do HTLC)
     let timelock_a = U256::from(now_unix() + 7200);
     let timelock_b = U256::from(now_unix() + 3600);
 
@@ -88,7 +92,14 @@ async fn cross_chain_swap_is_correlated_and_preimage_captured() {
 
     // contractId da perna B (para resgatar)
     let cid_b: B256 = htlc_b
-        .computeContractId(sender_b, recipient_b, Address::ZERO, amount, hashlock_b, timelock_b)
+        .computeContractId(
+            sender_b,
+            recipient_b,
+            Address::ZERO,
+            amount,
+            hashlock_b,
+            timelock_b,
+        )
         .call()
         .await
         .unwrap();
@@ -146,7 +157,13 @@ async fn watchdog_detects_expired_swap() {
 
     // trava uma perna e NUNCA resgata
     htlc_a
-        .newSwap(sender_a, Address::ZERO, amount, hashlock_b, U256::from(timelock))
+        .newSwap(
+            sender_a,
+            Address::ZERO,
+            amount,
+            hashlock_b,
+            U256::from(timelock),
+        )
         .value(amount)
         .send()
         .await

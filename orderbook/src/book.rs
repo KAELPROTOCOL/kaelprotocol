@@ -78,7 +78,12 @@ impl<V: SignatureVerifier> Book<V> {
 
     /// Ingestão verificada na borda. Re-verifica a assinatura; rejeita
     /// inválida/expirada/duplicada ANTES de inserir. Retorna o hash canônico.
-    pub fn submit(&mut self, order: Order, signature: &[u8], now: u64) -> Result<[u8; 32], SubmitError> {
+    pub fn submit(
+        &mut self,
+        order: Order,
+        signature: &[u8],
+        now: u64,
+    ) -> Result<[u8; 32], SubmitError> {
         let hash = self
             .verifier
             .verify(&order, signature, now)
@@ -111,7 +116,8 @@ impl<V: SignatureVerifier> Book<V> {
                 .filter(|&j| j != i && matching::compatible(taker, &self.orders[j], now))
                 .collect();
             // ordena por price-time: melhor maker primeiro, determinístico
-            cands.sort_by(|&x, &y| matching::cmp_makers_for_taker(&self.orders[x], &self.orders[y]));
+            cands
+                .sort_by(|&x, &y| matching::cmp_makers_for_taker(&self.orders[x], &self.orders[y]));
             for j in cands {
                 out.push(MatchPair {
                     taker_hash: self.hashes[i],
@@ -240,7 +246,7 @@ mod tests {
         m_meh.sell_amount = 200; // dá 200 Y
         let mut m_best = mirror(0xCC, 3, 1000);
         m_best.sell_amount = 300; // dá 300 Y → melhor preço para o taker
-        // inserido o "meh" ANTES do "best": só o price-time pode reordenar
+                                  // inserido o "meh" ANTES do "best": só o price-time pode reordenar
         b.submit(m_meh, b"ok", 500).unwrap();
         b.submit(m_best, b"ok", 500).unwrap();
 
@@ -251,6 +257,9 @@ mod tests {
         let mut best_hash = [0u8; 32];
         best_hash[..20].copy_from_slice(&[0xCC; 20]);
         best_hash[24..].copy_from_slice(&3u64.to_be_bytes());
-        assert_eq!(m[0].maker_hash, best_hash, "melhor preço deve ser servido primeiro");
+        assert_eq!(
+            m[0].maker_hash, best_hash,
+            "melhor preço deve ser servido primeiro"
+        );
     }
 }

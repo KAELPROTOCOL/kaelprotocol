@@ -287,7 +287,9 @@ impl ChainVerifier for RpcVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::verify::{verify_counterparty_leg, LegExpectation, Role, UnsafeReason, VerifyOutcome};
+    use crate::verify::{
+        verify_counterparty_leg, LegExpectation, Role, UnsafeReason, VerifyOutcome,
+    };
 
     fn h(b: u8) -> [u8; 32] {
         [b; 32]
@@ -298,7 +300,7 @@ mod tests {
 
     fn active_swap() -> RawSwap {
         RawSwap {
-            sender: a(0x3A), // maker travou
+            sender: a(0x3A),    // maker travou
             recipient: a(0x7A), // paga o taker
             token: a(0x22),
             amount: 500,
@@ -366,7 +368,10 @@ mod tests {
             now: 0,
             role: Role::Taker,
         };
-        assert_eq!(verify_counterparty_leg(&exp, &observed), VerifyOutcome::Safe);
+        assert_eq!(
+            verify_counterparty_leg(&exp, &observed),
+            VerifyOutcome::Safe
+        );
     }
 
     #[test]
@@ -445,7 +450,10 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn now_unix() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
     }
 
     #[tokio::test]
@@ -552,7 +560,11 @@ mod tests {
 
         // === negativo: um contractId inexistente lê como Absent ===
         let absent = v.observe_lock(htlc_addr, [0xFFu8; 32], 1).await.unwrap();
-        assert_eq!(absent, LockObservation::Absent, "trava inexistente → Absent");
+        assert_eq!(
+            absent,
+            LockObservation::Absent,
+            "trava inexistente → Absent"
+        );
         // e Absent vira None no gate → a máquina ESPERA (não há trava a verificar).
         // (que um ObservedLock inexistente verifica como LockNotFound continua
         // coberto pelo teste puro `withdrawn_lock_verifies_as_lock_not_found`.)
@@ -632,8 +644,16 @@ mod tests {
         );
 
         // minera 1 bloco (auto-transferência) → 2 confirmações.
-        let bump = TransactionRequest::default().to(sender).value(U256::from(0));
-        provider.send_transaction(bump).await.unwrap().get_receipt().await.unwrap();
+        let bump = TransactionRequest::default()
+            .to(sender)
+            .value(U256::from(0));
+        provider
+            .send_transaction(bump)
+            .await
+            .unwrap()
+            .get_receipt()
+            .await
+            .unwrap();
 
         // a MESMA trava, agora 2-funda → min=2 vira Confirmed (o gate se moveu).
         assert!(

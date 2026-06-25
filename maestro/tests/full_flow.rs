@@ -31,7 +31,10 @@ const PK_MAKER_A: [u8; 32] = [0xA1; 32];
 const PK_MAKER_B: [u8; 32] = [0xB2; 32];
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 fn order_json(o: &Order) -> serde_json::Value {
@@ -86,14 +89,26 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
     let sig_a = format!("0x{}", hex::encode(sign(&order_a, &PK_MAKER_A)));
     let sig_b = format!("0x{}", hex::encode(sign(&order_b, &PK_MAKER_B)));
 
-    let r = http_post(&format!("{base}/orders"), &json!({"order": order_json(&order_a), "signature": sig_a})).await;
+    let r = http_post(
+        &format!("{base}/orders"),
+        &json!({"order": order_json(&order_a), "signature": sig_a}),
+    )
+    .await;
     assert_eq!(r.0, 200, "A aceita pela borda: {}", r.1);
-    let r = http_post(&format!("{base}/orders"), &json!({"order": order_json(&order_b), "signature": sig_b})).await;
+    let r = http_post(
+        &format!("{base}/orders"),
+        &json!({"order": order_json(&order_b), "signature": sig_b}),
+    )
+    .await;
     assert_eq!(r.0, 200, "B aceita pela borda: {}", r.1);
 
     let m = http_get(&format!("{base}/matches?maker=0x{}", hex::encode(maker_a))).await;
     let pairs: serde_json::Value = serde_json::from_str(&m.1).unwrap();
-    assert_eq!(pairs.as_array().unwrap().len(), 1, "o livro deveria informar 1 par");
+    assert_eq!(
+        pairs.as_array().unwrap().len(),
+        1,
+        "o livro deveria informar 1 par"
+    );
 
     // ===== ETAPA 2: liquidação via HTLC (on-chain, conduzida pelas carteiras) =====
     let (_anvil_a, prov_a, wallet_a) = spawn_chain(CHAIN_A).await;
@@ -109,50 +124,101 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
     let tl_b = U256::from(now_unix() + 3600); // curto em B
 
     // trava em A (recipiente = parte B)
-    htlc_a.newSwap(wallet_b, Address::ZERO, amount, hl, tl_a).value(amount)
-        .send().await.unwrap().get_receipt().await.unwrap();
+    htlc_a
+        .newSwap(wallet_b, Address::ZERO, amount, hl, tl_a)
+        .value(amount)
+        .send()
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
     // trava em B (recipiente = parte A), mesmo hashlock
-    htlc_b.newSwap(wallet_a, Address::ZERO, amount, hl, tl_b).value(amount)
-        .send().await.unwrap().get_receipt().await.unwrap();
+    htlc_b
+        .newSwap(wallet_a, Address::ZERO, amount, hl, tl_b)
+        .value(amount)
+        .send()
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
 
     // resgate em B revela o preimage
     let cid_b: B256 = htlc_b
         .computeContractId(wallet_b, wallet_a, Address::ZERO, amount, hl, tl_b)
-        .call().await.unwrap();
-    htlc_b.redeem(cid_b, B256::from(preimage))
-        .send().await.unwrap().get_receipt().await.unwrap();
+        .call()
+        .await
+        .unwrap();
+    htlc_b
+        .redeem(cid_b, B256::from(preimage))
+        .send()
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
     // resgate em A usando o preimage revelado
     let cid_a: B256 = htlc_a
         .computeContractId(wallet_a, wallet_b, Address::ZERO, amount, hl, tl_a)
-        .call().await.unwrap();
-    htlc_a.redeem(cid_a, B256::from(preimage))
-        .send().await.unwrap().get_receipt().await.unwrap();
+        .call()
+        .await
+        .unwrap();
+    htlc_a
+        .redeem(cid_a, B256::from(preimage))
+        .send()
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
 
     // ===== ETAPA 3: o maestro correlaciona =====
     let mut tracker = SwapTracker::new();
     let head_a = prov_a.get_block_number().await.unwrap();
     let head_b = prov_b.get_block_number().await.unwrap();
-    poll_into_tracker(&prov_a, *htlc_a.address(), CHAIN_A, 0, head_a, &mut tracker).await.unwrap();
-    poll_into_tracker(&prov_b, *htlc_b.address(), CHAIN_B, 0, head_b, &mut tracker).await.unwrap();
+    poll_into_tracker(&prov_a, *htlc_a.address(), CHAIN_A, 0, head_a, &mut tracker)
+        .await
+        .unwrap();
+    poll_into_tracker(&prov_b, *htlc_b.address(), CHAIN_B, 0, head_b, &mut tracker)
+        .await
+        .unwrap();
 
-    assert_eq!(tracker.correlated_hashlocks(), vec![hashlock], "swap correlacionado");
-    assert_eq!(tracker.preimage_for(&hashlock), Some(preimage), "preimage capturado");
+    assert_eq!(
+        tracker.correlated_hashlocks(),
+        vec![hashlock],
+        "swap correlacionado"
+    );
+    assert_eq!(
+        tracker.preimage_for(&hashlock),
+        Some(preimage),
+        "preimage capturado"
+    );
 
     // ambas as pernas resgatadas → swap concluído nas duas chains
     let s = tracker.get(&hashlock).unwrap();
-    assert!(s.legs.iter().all(|l| l.redeemed), "ambas as pernas resgatadas");
+    assert!(
+        s.legs.iter().all(|l| l.redeemed),
+        "ambas as pernas resgatadas"
+    );
 
     // o swap completou sem que servidor ou maestro tocassem fundos.
 }
 
 async fn spawn_chain(
     chain_id: u64,
-) -> (alloy::node_bindings::AnvilInstance, impl Provider + Clone, Address) {
+) -> (
+    alloy::node_bindings::AnvilInstance,
+    impl Provider + Clone,
+    Address,
+) {
     let anvil = Anvil::new().chain_id(chain_id).spawn();
     let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
     let sender = signer.address();
     let wallet = EthereumWallet::from(signer);
-    let provider = ProviderBuilder::new().wallet(wallet).connect_http(anvil.endpoint_url());
+    let provider = ProviderBuilder::new()
+        .wallet(wallet)
+        .connect_http(anvil.endpoint_url());
     (anvil, provider, sender)
 }
 
@@ -180,7 +246,11 @@ async fn http_request(method: &str, url: &str, body: Option<&serde_json::Value>)
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.unwrap();
     let text = String::from_utf8_lossy(&buf);
-    let status: u16 = text.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let status: u16 = text
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
     (status, body)
 }

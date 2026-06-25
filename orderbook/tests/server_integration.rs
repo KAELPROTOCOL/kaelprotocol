@@ -24,17 +24,28 @@ fn maker_address(pk: &[u8; 32]) -> [u8; 20] {
     a
 }
 
-fn build_order(maker: [u8; 20], sell_tok: u8, sell_chain: u64, sell_amt: u128, buy_tok: u8, buy_chain: u64, buy_amt: u128, nonce: u64) -> Order {
+struct OrderSpec {
+    maker: [u8; 20],
+    sell_tok: u8,
+    sell_chain: u64,
+    sell_amt: u128,
+    buy_tok: u8,
+    buy_chain: u64,
+    buy_amt: u128,
+    nonce: u64,
+}
+
+fn build_order(spec: OrderSpec) -> Order {
     Order {
-        maker,
-        sell_token: [sell_tok; 20],
-        sell_chain_id: sell_chain,
-        sell_amount: sell_amt,
-        buy_token: [buy_tok; 20],
-        buy_chain_id: buy_chain,
-        buy_amount: buy_amt,
+        maker: spec.maker,
+        sell_token: [spec.sell_tok; 20],
+        sell_chain_id: spec.sell_chain,
+        sell_amount: spec.sell_amt,
+        buy_token: [spec.buy_tok; 20],
+        buy_chain_id: spec.buy_chain,
+        buy_amount: spec.buy_amt,
         valid_until: 4_000_000_000,
-        nonce,
+        nonce: spec.nonce,
         created_at: 0, // ignorado no payload assinado
     }
 }
@@ -59,7 +70,9 @@ async fn spawn_server() -> String {
     let addr = listener.local_addr().unwrap();
     // Usa o router DE PRODUÇÃO (orderbook::server) — o teste exercita o app real.
     let app = orderbook::server::build_router(orderbook::server::AppState::new());
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
     format!("http://{addr}")
 }
 
@@ -72,30 +85,74 @@ async fn submit_verifies_and_matches_are_reported() {
     let maker_b = maker_address(&PK_B);
 
     // A vende 100 de tok 0x11 (chain 1), quer 200 de tok 0x22 (chain 10)
-    let a = build_order(maker_a, 0x11, 1, 100, 0x22, 10, 200, 1);
+    let a = build_order(OrderSpec {
+        maker: maker_a,
+        sell_tok: 0x11,
+        sell_chain: 1,
+        sell_amt: 100,
+        buy_tok: 0x22,
+        buy_chain: 10,
+        buy_amt: 200,
+        nonce: 1,
+    });
     // B espelho: vende 200 de 0x22 (chain 10), quer 100 de 0x11 (chain 1)
-    let b = build_order(maker_b, 0x22, 10, 200, 0x11, 1, 100, 2);
+    let b = build_order(OrderSpec {
+        maker: maker_b,
+        sell_tok: 0x22,
+        sell_chain: 10,
+        sell_amt: 200,
+        buy_tok: 0x11,
+        buy_chain: 1,
+        buy_amt: 100,
+        nonce: 2,
+    });
 
     let sig_a = format!("0x{}", hex::encode(sign(&a, &PK_A)));
     let sig_b = format!("0x{}", hex::encode(sign(&b, &PK_B)));
 
     // 1) ordem válida entra
-    let r = client.post(&format!("{base}/orders"), &json!({"order": order_json(&a), "signature": sig_a})).await;
+    let r = client
+        .post(
+            &format!("{base}/orders"),
+            &json!({"order": order_json(&a), "signature": sig_a}),
+        )
+        .await;
     assert_eq!(r.0, 200, "A deveria ser aceita: {}", r.1);
 
     // 2) assinatura inválida (trocada) é rejeitada na borda
-    let bad = client.post(&format!("{base}/orders"), &json!({"order": order_json(&b), "signature": sig_a})).await;
-    assert_eq!(bad.0, 422, "assinatura errada deveria ser rejeitada: {}", bad.1);
+    let bad = client
+        .post(
+            &format!("{base}/orders"),
+            &json!({"order": order_json(&b), "signature": sig_a}),
+        )
+        .await;
+    assert_eq!(
+        bad.0, 422,
+        "assinatura errada deveria ser rejeitada: {}",
+        bad.1
+    );
 
     // 3) ordem espelhada válida entra
-    let r = client.post(&format!("{base}/orders"), &json!({"order": order_json(&b), "signature": sig_b})).await;
+    let r = client
+        .post(
+            &format!("{base}/orders"),
+            &json!({"order": order_json(&b), "signature": sig_b}),
+        )
+        .await;
     assert_eq!(r.0, 200, "B deveria ser aceita: {}", r.1);
 
     // 4) a consulta informa o par compatível para o maker A
-    let m = client.get(&format!("{base}/matches?maker=0x{}", hex::encode(maker_a))).await;
+    let m = client
+        .get(&format!("{base}/matches?maker=0x{}", hex::encode(maker_a)))
+        .await;
     assert_eq!(m.0, 200);
     let pairs: serde_json::Value = serde_json::from_str(&m.1).unwrap();
-    assert_eq!(pairs.as_array().unwrap().len(), 1, "esperava 1 par, veio: {}", m.1);
+    assert_eq!(
+        pairs.as_array().unwrap().len(),
+        1,
+        "esperava 1 par, veio: {}",
+        m.1
+    );
 }
 
 // Cliente HTTP mínimo sobre TcpStream (sem dep extra de cliente).
@@ -107,7 +164,12 @@ impl SimpleClient {
     async fn get(&self, url: &str) -> (u16, String) {
         self.request("GET", url, None).await
     }
-    async fn request(&self, method: &str, url: &str, body: Option<&serde_json::Value>) -> (u16, String) {
+    async fn request(
+        &self,
+        method: &str,
+        url: &str,
+        body: Option<&serde_json::Value>,
+    ) -> (u16, String) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let (host_port, path) = {
             let rest = url.strip_prefix("http://").unwrap();
@@ -126,7 +188,11 @@ impl SimpleClient {
         let mut buf = Vec::new();
         stream.read_to_end(&mut buf).await.unwrap();
         let text = String::from_utf8_lossy(&buf);
-        let status: u16 = text.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let status: u16 = text
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
         (status, body)
     }

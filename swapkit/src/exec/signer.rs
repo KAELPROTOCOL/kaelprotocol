@@ -103,7 +103,10 @@ impl Signer {
             .parse()
             .map_err(|e| SignerError::BadUrl(format!("{e}")))?;
         let wallet = EthereumWallet::from(signer);
-        let provider = ProviderBuilder::new().wallet(wallet).connect_http(url).erased();
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect_http(url)
+            .erased();
 
         // I/O: pergunta ao nó em que chain estamos.
         let chain_id = provider
@@ -114,7 +117,11 @@ impl Signer {
         // GUARD — antes de QUALQUER assinatura, antes de devolver o Signer.
         assert_chain_allowed(chain_id)?;
 
-        Ok(Self { provider, address, chain_id })
+        Ok(Self {
+            provider,
+            address,
+            chain_id,
+        })
     }
 
     /// O endereço que esta chave controla (= recipient da minha perna p/ a contraparte).
@@ -148,18 +155,18 @@ pub fn assert_chain_allowed(chain_id: u64) -> Result<(), SignerError> {
 mod tests {
     use super::*;
     use alloy::node_bindings::Anvil;
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
 
     // Chave #0 determinística do anvil (mnemônico default) e seu endereço.
     // A chave só precisa ser VÁLIDA p/ os testes — não precisa de saldo.
     const ANVIL_KEY0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
     const ANVIL_ADDR0: [u8; 20] = [
         0xf3, 0x9F, 0xd6, 0xe5, 0x1a, 0xad, 0x88, 0xF6, 0xF4, 0xce, 0x6a, 0xB8, 0x82, 0x72, 0x79,
-        0xcf, 0xfF, 0xb9, 0x22, 0x66,
+        0xcf, 0xff, 0xb9, 0x22, 0x66,
     ];
 
     // set_var/remove_var é global ao processo; serializa os testes que tocam a env.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     // ---------------- o GUARD, puro (sem rede) ----------------
 
@@ -208,7 +215,11 @@ mod tests {
             .await
             .expect("31337 está na allowlist → deve construir");
         assert_eq!(s.chain_id(), 31337);
-        assert_eq!(s.address(), ANVIL_ADDR0, "endereço derivado da chave #0 do anvil");
+        assert_eq!(
+            s.address(),
+            ANVIL_ADDR0,
+            "endereço derivado da chave #0 do anvil"
+        );
     }
 
     // aceita a chave com prefixo 0x também.
@@ -216,7 +227,9 @@ mod tests {
     async fn accepts_0x_prefixed_key() {
         let anvil = Anvil::new().spawn();
         let prefixed = format!("0x{ANVIL_KEY0}");
-        let s = Signer::from_key_str(&prefixed, &anvil.endpoint()).await.unwrap();
+        let s = Signer::from_key_str(&prefixed, &anvil.endpoint())
+            .await
+            .unwrap();
         assert_eq!(s.address(), ANVIL_ADDR0);
     }
 
@@ -238,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn from_env_missing_then_present() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().await;
 
         // ausente → MissingKey
         std::env::remove_var(ENV_KEY);
@@ -257,7 +270,7 @@ mod tests {
     // from_env numa chain proibida também aborta (o guard não depende da fonte da chave).
     #[tokio::test]
     async fn from_env_forbidden_chain_yields_err() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().await;
 
         let anvil = Anvil::new().chain_id(1).spawn();
         std::env::set_var(ENV_KEY, ANVIL_KEY0);

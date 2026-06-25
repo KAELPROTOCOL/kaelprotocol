@@ -22,7 +22,10 @@
 //! gravado no estado poderia ser burlado se as condições da outra chain mudassem
 //! (reorg, substituição). Verificar sempre, a partir do observado, é mais seguro.
 
-use crate::verify::{verify_counterparty_leg, Address, LegExpectation, ObservedLock, Role, UnsafeReason, VerifyOutcome};
+use crate::verify::{
+    verify_counterparty_leg, Address, LegExpectation, ObservedLock, Role, UnsafeReason,
+    VerifyOutcome,
+};
 use serde::{Deserialize, Serialize};
 
 /// Os estados pelos quais um swap passa, do ponto de vista DESTA parte.
@@ -205,7 +208,9 @@ fn taker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
         SwapState::Start => NextAction::GenerateSecret,
         SwapState::SecretGenerated => match ctx.hashlock {
             Some(h) => ctx.lock_my_leg(h),
-            None => NextAction::Abort { reason: AbortReason::MissingHashlock },
+            None => NextAction::Abort {
+                reason: AbortReason::MissingHashlock,
+            },
         },
         SwapState::MyLegLocked => match ctx.counterparty_lock {
             // a perna do maker ainda não apareceu
@@ -220,14 +225,18 @@ fn taker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
             Some(obs) => match verify_counterparty_leg(&ctx.expectation(), &obs) {
                 VerifyOutcome::Safe => match ctx.secret {
                     Some(s) => NextAction::RedeemCounterpartyLeg { secret: s },
-                    None => NextAction::Abort { reason: AbortReason::MissingSecret },
+                    None => NextAction::Abort {
+                        reason: AbortReason::MissingSecret,
+                    },
                 },
                 // INSEGURA + já travei → reembolso. O SEGREDO NUNCA VAZA.
                 VerifyOutcome::Unsafe(_) => NextAction::Refund,
             },
         },
         // estados de maker não fazem sentido para o taker
-        _ => NextAction::Abort { reason: AbortReason::InvalidState },
+        _ => NextAction::Abort {
+            reason: AbortReason::InvalidState,
+        },
     }
 }
 
@@ -240,10 +249,14 @@ fn maker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
             Some(obs) => match verify_counterparty_leg(&ctx.expectation(), &obs) {
                 VerifyOutcome::Safe => match ctx.hashlock {
                     Some(h) => ctx.lock_my_leg(h),
-                    None => NextAction::Abort { reason: AbortReason::MissingHashlock },
+                    None => NextAction::Abort {
+                        reason: AbortReason::MissingHashlock,
+                    },
                 },
                 // INSEGURA + ainda NÃO travei → aborto. NUNCA travo contra perna insegura.
-                VerifyOutcome::Unsafe(r) => NextAction::Abort { reason: AbortReason::UnsafeCounterparty(r) },
+                VerifyOutcome::Unsafe(r) => NextAction::Abort {
+                    reason: AbortReason::UnsafeCounterparty(r),
+                },
             },
         },
         SwapState::WaitingForSecret => match ctx.revealed_secret {
@@ -258,10 +271,14 @@ fn maker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
         },
         SwapState::SecretLearned => match ctx.revealed_secret {
             Some(s) => NextAction::RedeemCounterpartyLeg { secret: s },
-            None => NextAction::Abort { reason: AbortReason::MissingSecret },
+            None => NextAction::Abort {
+                reason: AbortReason::MissingSecret,
+            },
         },
         // estados de taker não fazem sentido para o maker
-        _ => NextAction::Abort { reason: AbortReason::InvalidState },
+        _ => NextAction::Abort {
+            reason: AbortReason::InvalidState,
+        },
     }
 }
 
@@ -330,7 +347,7 @@ mod tests {
             role: Role::Taker,
             my_token: a(TOK_A),
             my_amount: 1000,
-            my_timelock: 2000, // LONGO
+            my_timelock: 2000,           // LONGO
             my_recipient: a(MAKER_ADDR), // minha perna paga o maker
             cp_token: a(TOK_B),
             cp_amount: 500,
@@ -429,7 +446,11 @@ mod tests {
         ctx.now = 1750;
 
         let action = next_action(&SwapState::MyLegLocked, &ctx);
-        assert_eq!(action, NextAction::Refund, "deve reembolsar, jamais resgatar");
+        assert_eq!(
+            action,
+            NextAction::Refund,
+            "deve reembolsar, jamais resgatar"
+        );
         assert!(
             !matches!(action, NextAction::RedeemCounterpartyLeg { .. }),
             "o segredo NUNCA pode vazar contra uma perna prestes a expirar"
@@ -443,7 +464,7 @@ mod tests {
             role: Role::Maker,
             my_token: a(TOK_B),
             my_amount: 500,
-            my_timelock: 1000, // CURTO
+            my_timelock: 1000,           // CURTO
             my_recipient: a(TAKER_ADDR), // minha perna paga o taker
             cp_token: a(TOK_A),
             cp_amount: 1000,
@@ -523,7 +544,9 @@ mod tests {
         let action = next_action(&SwapState::Start, &ctx);
         assert_eq!(
             action,
-            NextAction::Abort { reason: AbortReason::UnsafeCounterparty(UnsafeReason::TimelockGapTooSmall) }
+            NextAction::Abort {
+                reason: AbortReason::UnsafeCounterparty(UnsafeReason::TimelockGapTooSmall)
+            }
         );
         assert!(
             !matches!(action, NextAction::LockMyLeg { .. }),
@@ -542,7 +565,9 @@ mod tests {
         let action = next_action(&SwapState::Start, &ctx);
         assert_eq!(
             action,
-            NextAction::Abort { reason: AbortReason::UnsafeCounterparty(UnsafeReason::HashlockMismatch) }
+            NextAction::Abort {
+                reason: AbortReason::UnsafeCounterparty(UnsafeReason::HashlockMismatch)
+            }
         );
         assert!(!matches!(action, NextAction::LockMyLeg { .. }));
     }
@@ -599,18 +624,26 @@ mod tests {
 
     #[test]
     fn terminal_states_absorb_events() {
-        assert_eq!(advance(SwapState::Done, SwapEvent::TimelockExpired), SwapState::Done);
-        assert_eq!(advance(SwapState::Refunded, SwapEvent::MyLegConfirmed), SwapState::Refunded);
+        assert_eq!(
+            advance(SwapState::Done, SwapEvent::TimelockExpired),
+            SwapState::Done
+        );
+        assert_eq!(
+            advance(SwapState::Refunded, SwapEvent::MyLegConfirmed),
+            SwapState::Refunded
+        );
     }
 
     // papel errado para o estado → InvalidState (sem panic)
     #[test]
     fn wrong_role_for_state_is_invalid_state() {
         let ctx = taker_ctx(); // taker
-        // WaitingForSecret é estado de maker
+                               // WaitingForSecret é estado de maker
         assert_eq!(
             next_action(&SwapState::WaitingForSecret, &ctx),
-            NextAction::Abort { reason: AbortReason::InvalidState }
+            NextAction::Abort {
+                reason: AbortReason::InvalidState
+            }
         );
     }
 }

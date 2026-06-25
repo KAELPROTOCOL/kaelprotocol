@@ -17,6 +17,7 @@
 //! - **ambos-Taker** → ao verificar a perna oposta (simétrica, sem assimetria de
 //!   timelock), a checagem acusa `TimelockInverted` (Unsafe) → o segredo NUNCA é
 //!   revelado → refund após expiração.
+//!
 //! O gate de [`crate::verify`] absorve a divergência. (provado nos testes)
 //!
 //! ## Modelo B (transporte do hashlock)
@@ -68,7 +69,7 @@ pub struct TimelockPolicy {
 pub fn assign_role(order_self: &Order, order_cp: &Order) -> Role {
     use std::cmp::Ordering;
     match order_self.created_at.cmp(&order_cp.created_at) {
-        Ordering::Less => Role::Maker,    // EU em repouso (mais antigo) → Maker
+        Ordering::Less => Role::Maker, // EU em repouso (mais antigo) → Maker
         Ordering::Greater => Role::Taker, // EU cruzei (mais recente) → Taker
         // empate de tempo → desempate por DADO ASSINADO (imune ao servidor):
         // menor digest = Maker. Ordem lexicográfica big-endian dos 32 bytes.
@@ -180,7 +181,11 @@ mod tests {
 
     fn policy() -> TimelockPolicy {
         // 7200 >= 3600 + 1800 → assimetria válida
-        TimelockPolicy { taker_lock_secs: 7200, maker_lock_secs: 3600, min_gap: 1800 }
+        TimelockPolicy {
+            taker_lock_secs: 7200,
+            maker_lock_secs: 3600,
+            min_gap: 1800,
+        }
     }
 
     // ===================== PROVA 1: papéis COMPLEMENTARES =====================
@@ -228,7 +233,7 @@ mod tests {
     #[test]
     fn derives_context_with_price_improvement_and_recipients() {
         let a = order_a(10); // A = Maker (mais antigo)
-        // B vende 600 (A pediu só 500) → melhora de preço
+                             // B vende 600 (A pediu só 500) → melhora de preço
         let b = ord(0xBB, 2, Y, 10, 600, X, 1, 1000, 20);
         let role = assign_role(&a, &b);
         assert_eq!(role, Role::Maker);
@@ -314,7 +319,11 @@ mod tests {
         ctx2.counterparty_lock = Some(b_leg);
 
         let action = next_action(&SwapState::MyLegLocked, &ctx2);
-        assert_eq!(action, NextAction::Refund, "sem assimetria → Unsafe → refund");
+        assert_eq!(
+            action,
+            NextAction::Refund,
+            "sem assimetria → Unsafe → refund"
+        );
         assert!(
             !matches!(action, NextAction::RedeemCounterpartyLeg { .. }),
             "o segredo NUNCA é revelado sob divergência de papel"

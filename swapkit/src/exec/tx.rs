@@ -45,7 +45,10 @@ impl std::fmt::Display for TxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TxError::TokenNotSupportedYet => {
-                write!(f, "MVP só suporta ETH nativo (token=0x0); ERC-20 é trabalho futuro")
+                write!(
+                    f,
+                    "MVP só suporta ETH nativo (token=0x0); ERC-20 é trabalho futuro"
+                )
             }
             TxError::Send(e) => write!(f, "falha ao enviar/minerar a tx: {e}"),
         }
@@ -103,7 +106,14 @@ pub async fn lock(
         return Err(TxError::TokenNotSupportedYet);
     }
     // o sender on-chain será o endereço do signer → é com ele que o contractId casa.
-    let contract_id = compute_contract_id(signer.address(), recipient, token, amount, hashlock, timelock);
+    let contract_id = compute_contract_id(
+        signer.address(),
+        recipient,
+        token,
+        amount,
+        hashlock,
+        timelock,
+    );
 
     let htlc_c = IHashedTimelockWrite::new(EvmAddress::from(htlc), signer.provider());
     let receipt = htlc_c
@@ -122,7 +132,10 @@ pub async fn lock(
         .await
         .map_err(|e| TxError::Send(format!("{e}")))?;
 
-    Ok(Locked { contract_id, tx_hash: receipt.transaction_hash.0 })
+    Ok(Locked {
+        contract_id,
+        tx_hash: receipt.transaction_hash.0,
+    })
 }
 
 /// Resgata a perna OPOSTA revelando o `secret`: `redeem(contract_id, secret)`.
@@ -180,7 +193,10 @@ mod tests {
     const ANVIL_KEY0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
     fn now_unix() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
     }
 
     // ---- O TESTE QUE IMPORTA: contractId do Rust == contractId do contrato ----
@@ -197,11 +213,15 @@ mod tests {
             .wallet(wallet)
             .connect_http(anvil.endpoint_url());
 
-        let htlc = HashedTimelock::deploy(deploy_provider.clone()).await.unwrap();
+        let htlc = HashedTimelock::deploy(deploy_provider.clone())
+            .await
+            .unwrap();
         let htlc_addr: Address = (*htlc.address()).into_array();
 
         // o signer do executor (mesma chave) — guard allowlist passa em 31337.
-        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint()).await.unwrap();
+        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint())
+            .await
+            .unwrap();
         assert_eq!(signer.address(), sender.into_array(), "sanity: mesma conta");
 
         let me = signer.address(); // recipient = eu (qualquer um resgata com o preimage)
@@ -234,22 +254,31 @@ mod tests {
         let locked = lock(&signer, htlc_addr, me, token, amount, hashlock, timelock)
             .await
             .unwrap();
-        assert_eq!(locked.contract_id, rust_cid, "lock devolve o contractId computado");
+        assert_eq!(
+            locked.contract_id, rust_cid,
+            "lock devolve o contractId computado"
+        );
 
         // (3) o contractId devolvido endereça a trava REAL (lê Confirmed).
         let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
         assert!(
             matches!(
-                v.observe_lock(htlc_addr, locked.contract_id, 1).await.unwrap(),
+                v.observe_lock(htlc_addr, locked.contract_id, 1)
+                    .await
+                    .unwrap(),
                 LockObservation::Confirmed(_)
             ),
             "o contractId computado encontra a trava criada"
         );
 
         // (4) redeem real → a trava some (Absent). Prova a tradução de redeem.
-        redeem(&signer, htlc_addr, locked.contract_id, preimage).await.unwrap();
+        redeem(&signer, htlc_addr, locked.contract_id, preimage)
+            .await
+            .unwrap();
         assert_eq!(
-            v.observe_lock(htlc_addr, locked.contract_id, 1).await.unwrap(),
+            v.observe_lock(htlc_addr, locked.contract_id, 1)
+                .await
+                .unwrap(),
             LockObservation::Absent,
             "após redeem → Absent"
         );
@@ -268,35 +297,49 @@ mod tests {
         let deploy_provider = ProviderBuilder::new()
             .wallet(wallet)
             .connect_http(anvil.endpoint_url());
-        let htlc = HashedTimelock::deploy(deploy_provider.clone()).await.unwrap();
+        let htlc = HashedTimelock::deploy(deploy_provider.clone())
+            .await
+            .unwrap();
         let htlc_addr: Address = (*htlc.address()).into_array();
 
-        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint()).await.unwrap();
+        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint())
+            .await
+            .unwrap();
         let me = signer.address();
         let amount: u128 = 777;
         let hashlock = hashlock_from_preimage(&[0x01u8; 32]);
         let timelock = now_unix() + 100;
 
-        let locked = lock(&signer, htlc_addr, me, [0u8; 20], amount, hashlock, timelock)
-            .await
-            .unwrap();
+        let locked = lock(
+            &signer, htlc_addr, me, [0u8; 20], amount, hashlock, timelock,
+        )
+        .await
+        .unwrap();
 
         let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
         assert!(matches!(
-            v.observe_lock(htlc_addr, locked.contract_id, 1).await.unwrap(),
+            v.observe_lock(htlc_addr, locked.contract_id, 1)
+                .await
+                .unwrap(),
             LockObservation::Confirmed(_)
         ));
 
         // viaja além do timelock e minera um bloco para fixar o novo tempo.
         let p = signer.provider();
-        let _: serde_json::Value =
-            p.raw_request("evm_increaseTime".into(), (3601u64,)).await.unwrap();
+        let _: serde_json::Value = p
+            .raw_request("evm_increaseTime".into(), (3601u64,))
+            .await
+            .unwrap();
         let _: serde_json::Value = p.raw_request("evm_mine".into(), ()).await.unwrap();
 
         // refund real → a trava some (Absent). Mesmo contractId do lock.
-        refund(&signer, htlc_addr, locked.contract_id).await.unwrap();
+        refund(&signer, htlc_addr, locked.contract_id)
+            .await
+            .unwrap();
         assert_eq!(
-            v.observe_lock(htlc_addr, locked.contract_id, 1).await.unwrap(),
+            v.observe_lock(htlc_addr, locked.contract_id, 1)
+                .await
+                .unwrap(),
             LockObservation::Absent,
             "após refund → Absent"
         );
@@ -306,7 +349,9 @@ mod tests {
     #[tokio::test]
     async fn lock_rejects_erc20_token_for_now() {
         let anvil = Anvil::new().spawn();
-        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint()).await.unwrap();
+        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint())
+            .await
+            .unwrap();
         let r = lock(
             &signer,
             [0x11; 20],

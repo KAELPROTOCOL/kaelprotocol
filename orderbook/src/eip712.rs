@@ -128,7 +128,8 @@ pub fn verify(o: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyE
         return Err(VerifyError::InvalidV);
     }
 
-    let sig = Signature::from_slice(signature[0..64].as_ref()).map_err(|_| VerifyError::BadSignature)?;
+    let sig =
+        Signature::from_slice(signature[0..64].as_ref()).map_err(|_| VerifyError::BadSignature)?;
     let _ = r; // r/s já estão dentro de `sig`; mantidos acima para clareza
     let recid = RecoveryId::from_byte(v - 27).ok_or(VerifyError::InvalidV)?;
 
@@ -171,9 +172,7 @@ pub fn address_from_private_key(private_key: &[u8; 32]) -> [u8; 20] {
 pub fn sign(o: &Order, private_key: &[u8; 32]) -> [u8; 65] {
     let sk = SigningKey::from_slice(private_key).expect("chave privada inválida");
     let dig = digest(o);
-    let (sig, recid) = sk
-        .sign_prehash_recoverable(&dig)
-        .expect("falha ao assinar");
+    let (sig, recid) = sk.sign_prehash_recoverable(&dig).expect("falha ao assinar");
     let mut out = [0u8; 65];
     out[..64].copy_from_slice(&sig.to_bytes());
     out[64] = 27 + recid.to_byte();
@@ -292,8 +291,9 @@ mod tests {
 
     // ordem completa da curva secp256k1 (n).
     const SECP256K1_N: [u8; 32] = [
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36,
+        0x41, 0x41,
     ];
 
     // subtração big-endian de 32 bytes (a >= b), usada para s -> n - s.
@@ -327,7 +327,10 @@ mod tests {
         sig.extend_from_slice(&high_s); // s alto
         sig.push(if base[64] == 27 { 28 } else { 27 }); // v invertido
 
-        assert_eq!(verify(&o, &sig, 1_000_000_000), Err(VerifyError::MalleableS));
+        assert_eq!(
+            verify(&o, &sig, 1_000_000_000),
+            Err(VerifyError::MalleableS)
+        );
     }
 
     // v inválido (fora de {27,28}); deve dar InvalidV.

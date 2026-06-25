@@ -58,7 +58,10 @@ mod tests {
     const ANVIL_KEY0: &str = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
     fn now_unix() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
     }
 
     // Mesma convenção da peça 2: tx recém-minerada = 1 confirmação; o gate sobe
@@ -66,17 +69,29 @@ mod tests {
     #[tokio::test]
     async fn depth_of_my_tx_matches_piece2_convention() {
         let anvil = Anvil::new().spawn();
-        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint()).await.unwrap();
-        let htlc = HashedTimelock::deploy(signer.provider().clone()).await.unwrap();
+        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint())
+            .await
+            .unwrap();
+        let htlc = HashedTimelock::deploy(signer.provider().clone())
+            .await
+            .unwrap();
         let htlc_addr: Address = (*htlc.address()).into_array();
 
         // envio um lock real e pego o tx_hash.
         let me = signer.address();
         let preimage = [0x42u8; 32];
         let hashlock = hashlock_from_preimage(&preimage);
-        let locked = tx::lock(&signer, htlc_addr, me, [0u8; 20], 500, hashlock, now_unix() + 3600)
-            .await
-            .unwrap();
+        let locked = tx::lock(
+            &signer,
+            htlc_addr,
+            me,
+            [0u8; 20],
+            500,
+            hashlock,
+            now_unix() + 3600,
+        )
+        .await
+        .unwrap();
 
         let p = signer.provider();
         // recém-minerada = 1 confirmação.
@@ -85,8 +100,15 @@ mod tests {
         assert!(!is_confirmed(p, locked.tx_hash, 2).await.unwrap());
 
         // minera 1 bloco → 2 confirmações → o gate de 2 passa.
-        let bump = TransactionRequest::default().to(me.into()).value(U256::from(0));
-        p.send_transaction(bump).await.unwrap().get_receipt().await.unwrap();
+        let bump = TransactionRequest::default()
+            .to(me.into())
+            .value(U256::from(0));
+        p.send_transaction(bump)
+            .await
+            .unwrap()
+            .get_receipt()
+            .await
+            .unwrap();
         assert_eq!(confirmations_of(p, locked.tx_hash).await.unwrap(), 2);
         assert!(is_confirmed(p, locked.tx_hash, 2).await.unwrap());
     }

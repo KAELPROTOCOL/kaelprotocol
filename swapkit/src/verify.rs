@@ -133,7 +133,11 @@ pub fn verify_counterparty_leg(
 ///   `my_timelock`; aí o Maker usa o segredo para resgatar a perna do Taker e
 ///   precisa de tempo até `observed.timelock`. Logo a perna do Taker tem de
 ///   expirar DEPOIS, com margem:
+///
+///   ```text
 ///       observed.timelock >= my_timelock + min_gap
+///   ```
+///
 ///   - observed.timelock <= my_timelock           → TimelockInverted (não é nem maior)
 ///   - my_timelock < observed.timelock < my+gap   → TimelockGapTooSmall
 ///
@@ -142,7 +146,11 @@ pub fn verify_counterparty_leg(
 ///   Depois que ele revela, o Maker precisa de tempo para resgatar a perna do
 ///   Taker antes do `my_timelock`. Logo a perna do Maker tem de expirar ANTES,
 ///   com margem:
+///
+///   ```text
 ///       my_timelock >= observed.timelock + min_gap
+///   ```
+///
 ///   - observed.timelock >= my_timelock           → TimelockInverted (não é nem menor)
 ///   - my-gap < observed.timelock < my_timelock   → TimelockGapTooSmall
 ///
@@ -150,7 +158,10 @@ pub fn verify_counterparty_leg(
 /// a minha se eu sou o Maker curto; mais curta se eu sou o Taker longo) e com
 /// pelo menos `min_gap` de folga, senão quem age por último fica sem janela e
 /// pode ser roubado. Usamos somas saturadas para evitar overflow/underflow.
-fn check_timelock_gap(expectation: &LegExpectation, observed: &ObservedLock) -> Option<UnsafeReason> {
+fn check_timelock_gap(
+    expectation: &LegExpectation,
+    observed: &ObservedLock,
+) -> Option<UnsafeReason> {
     let my = expectation.my_timelock;
     let opp = observed.timelock;
     let gap = expectation.min_gap;
@@ -269,12 +280,18 @@ mod tests {
 
     #[test]
     fn safe_maker() {
-        assert_eq!(verify_counterparty_leg(&maker_exp(), &obs_for_maker()), VerifyOutcome::Safe);
+        assert_eq!(
+            verify_counterparty_leg(&maker_exp(), &obs_for_maker()),
+            VerifyOutcome::Safe
+        );
     }
 
     #[test]
     fn safe_taker() {
-        assert_eq!(verify_counterparty_leg(&taker_exp(), &obs_for_taker()), VerifyOutcome::Safe);
+        assert_eq!(
+            verify_counterparty_leg(&taker_exp(), &obs_for_taker()),
+            VerifyOutcome::Safe
+        );
     }
 
     // boundary: gap exato é seguro (>= / soma exata).
@@ -282,11 +299,17 @@ mod tests {
     fn safe_at_exact_gap_boundary() {
         let mut o = obs_for_maker();
         o.timelock = 1100; // == my(1000) + gap(100)
-        assert_eq!(verify_counterparty_leg(&maker_exp(), &o), VerifyOutcome::Safe);
+        assert_eq!(
+            verify_counterparty_leg(&maker_exp(), &o),
+            VerifyOutcome::Safe
+        );
 
         let mut ot = obs_for_taker();
         ot.timelock = 1900; // 1900 + 100 == my(2000)
-        assert_eq!(verify_counterparty_leg(&taker_exp(), &ot), VerifyOutcome::Safe);
+        assert_eq!(
+            verify_counterparty_leg(&taker_exp(), &ot),
+            VerifyOutcome::Safe
+        );
     }
 
     // ---- razões de Unsafe (campos) ----
@@ -434,7 +457,10 @@ mod tests {
     fn safe_at_exact_now_window_boundary() {
         let mut e = taker_exp();
         e.now = 1700; // 1800 == 1700 + 100 → folga exata, Safe
-        assert_eq!(verify_counterparty_leg(&e, &obs_for_taker()), VerifyOutcome::Safe);
+        assert_eq!(
+            verify_counterparty_leg(&e, &obs_for_taker()),
+            VerifyOutcome::Safe
+        );
     }
 
     // vale também para o maker: perna do taker do lado certo mas expirando já.

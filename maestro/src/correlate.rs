@@ -94,7 +94,12 @@ impl SwapTracker {
     /// Processa um `LogRedeem`: o preimage é revelado no evento. Derivamos o
     /// hashlock por SHA-256 (correlação!) e o guardamos — é ele que destrava a
     /// outra perna. Retorna o hashlock correlato se o preimage for consistente.
-    pub fn on_redeem(&mut self, chain_id: u64, contract_id: [u8; 32], preimage: [u8; 32]) -> Option<[u8; 32]> {
+    pub fn on_redeem(
+        &mut self,
+        chain_id: u64,
+        contract_id: [u8; 32],
+        preimage: [u8; 32],
+    ) -> Option<[u8; 32]> {
         let hashlock = hashlock_from_preimage(&preimage);
         let state = self.swaps.get_mut(&hashlock)?;
         state.preimage = Some(preimage);
@@ -180,9 +185,15 @@ mod tests {
 
         let mut t = SwapTracker::new();
         // trava na chain A
-        assert_eq!(t.on_new_swap(1, cid(0xA1), hashlock, 1000, 100), LegKind::First);
+        assert_eq!(
+            t.on_new_swap(1, cid(0xA1), hashlock, 1000, 100),
+            LegKind::First
+        );
         // trava na chain B, mesmo hashlock
-        assert_eq!(t.on_new_swap(10, cid(0xB1), hashlock, 900, 200), LegKind::Second);
+        assert_eq!(
+            t.on_new_swap(10, cid(0xB1), hashlock, 900, 200),
+            LegKind::Second
+        );
 
         // ainda não correlacionado? sim — duas pernas em chains distintas
         assert!(t.get(&hashlock).unwrap().correlated());
