@@ -10,6 +10,9 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# A carteira entende o formato de ordem assinada e o digest EIP-712 — FONTE ÚNICA
+# (não reimplementa o digest, reusa o do orderbook == Order.sol).
+orderbook = { path = "../orderbook" }
 # Leitura de chain EVM (RpcVerifier). Mesma lib do maestro.
 alloy = { version = "1.0", features = [
     "providers",
