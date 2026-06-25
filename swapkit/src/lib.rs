@@ -10,10 +10,12 @@
 //! atrás de uma interface, e alimentará esta lógica.
 
 pub mod chain;
+pub mod handshake;
 pub mod sm;
 pub mod verify;
 
 pub use chain::{observed_from_swap, ChainError, ChainVerifier, RawSwap, RpcVerifier};
+pub use handshake::{assign_role, derive_context, TimelockPolicy};
 
 pub use sm::{advance, next_action, AbortReason, NextAction, SwapContext, SwapEvent, SwapState};
 pub use verify::{
