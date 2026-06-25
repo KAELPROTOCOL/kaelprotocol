@@ -30,9 +30,10 @@ alloy = { version = "1.0", features = [
 # em vez de reimplementar. Promovido de dev-dependency para dependency normal —
 # confirmado SEM ciclo (maestro não depende do swapkit).
 maestro = { path = "../maestro" }
+rand = "0.8"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 alloy = { version = "1.0", features = ["node-bindings", "signer-local"] }
 # Viagem no tempo do anvil (evm_increaseTime/evm_mine via raw_request) para provar
 # o refund real APÓS expiração do timelock — o caminho de SEGURANÇA do protocolo.

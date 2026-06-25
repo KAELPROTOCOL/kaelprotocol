@@ -8,10 +8,6 @@ use serde_json::json;
 
 // Reusa o assinador e os tipos do lib. Aqui falamos só JSON, como um cliente real.
 
-fn addr_hex(b: u8) -> String {
-    format!("0x{}", hex::encode([b; 20]))
-}
-
 /// Chave privada de teste e seu endereço (derivado pelo próprio assinador).
 const PK_A: [u8; 32] = [0x11; 32];
 const PK_B: [u8; 32] = [0x22; 32];
