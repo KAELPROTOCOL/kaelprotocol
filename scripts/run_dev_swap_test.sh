@@ -20,6 +20,11 @@ echo "Kael development swap test"
 echo "Escopo: local/anvil apenas; sem mainnet, sem chaves reais, sem fundos reais."
 echo
 
+echo "1/2 Contratos Foundry"
+(cd contracts && forge test)
+
+echo
+echo "2/2 Swap local pela carteira"
 cargo test -p swapkit exec::tests::local_two_party_htlc_swap_e2e_wallet_driven -- --nocapture
 
 echo

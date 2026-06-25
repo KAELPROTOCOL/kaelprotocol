@@ -27,7 +27,7 @@ Baseline contract and Rust tests pass. The main blocker is not an existing broke
 |---|---:|---|
 | `pwd && whoami && git branch --show-current && git status --short && git log --oneline -5` | Pass | Environment confirmed. |
 | `rg --files` | Pass | Structure mapped. |
-| `cargo test --workspace` | Pass | 105 Rust tests passed; 1 warning in `orderbook/tests/server_integration.rs`. |
+| `cargo test --workspace` | Pass | 99 Rust tests passed after executor/e2e implementation. |
 | `cargo fmt --all -- --check` | Blocked | `cargo-fmt` is not installed for `stable-x86_64-unknown-linux-gnu`. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Blocked | `cargo-clippy` is not installed for `stable-x86_64-unknown-linux-gnu`. |
 | `cd contracts && forge test` | Pass | 36 Foundry tests passed. |
@@ -57,7 +57,7 @@ No Critical findings are open from the audited code paths. Existing gates preven
 - Evidence: `swapkit/src/exec/mod.rs` only declares submodules and documents piece 5 as pending.
 - Test: Absent before this review.
 - Recommendation: Implement `Clock`, `step()`, `run()`, idempotent state advancement, and anti-TOCTOU re-verification before lock/redeem.
-- Status: fixed
+- Status: open
 
 #### KAEL-H-002: No local two-party wallet-led HTLC e2e
 
@@ -81,7 +81,7 @@ No Critical findings are open from the audited code paths. Existing gates preven
 - Evidence: `error: 'cargo-fmt' is not installed for the toolchain 'stable-x86_64-unknown-linux-gnu'`.
 - Test: N/A.
 - Recommendation: Install with `rustup component add rustfmt`; document the validation limitation.
-- Status: open
+- Status: fixed
 
 #### KAEL-M-002: `cargo clippy` unavailable in current environment
 

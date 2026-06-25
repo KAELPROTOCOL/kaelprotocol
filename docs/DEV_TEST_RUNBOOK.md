@@ -24,7 +24,13 @@ From the repository root:
 
 ## What The Test Does
 
-The script runs the focused wallet-led development e2e:
+The script first runs the Solidity contract tests:
+
+```bash
+cd contracts && forge test
+```
+
+Then it runs the focused wallet-led development e2e:
 
 ```bash
 cargo test -p swapkit exec::tests::local_two_party_htlc_swap_e2e_wallet_driven -- --nocapture
