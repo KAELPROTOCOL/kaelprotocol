@@ -11,7 +11,7 @@
 
 ## 1. CONSTRUÍDO E TESTADO
 
-**Total: 114 testes passando, 0 ignorados** (36 Foundry + 78 Rust).
+**Total: 135 testes passando, 0 ignorados** (36 Foundry + 99 Rust).
 
 ### Contratos (Foundry) — 36 testes
 | Suíte | Testes | Cobre |
@@ -30,11 +30,12 @@
 - `e2e` (2): dois anvils, deploy do HTLC, swap correlacionado + preimage capturado; watchdog de expiração.
 - `full_flow` (1): capstone livro→liquidação→maestro.
 
-### `swapkit` (Rust) — 43 testes, 0 ignorados
+### `swapkit` (Rust) — 64 testes, 0 ignorados
 - `verify` (19): verificador de perna oposta (hashlock/token/amount/recipient + gap de timelock assimétrico por papel) **+ janela de relógio absoluta**: a perna oposta não pode expirar em menos de `now + min_gap` — fecha o vetor de "segredo revelado contra perna prestes a expirar".
 - `sm` (11): máquina de estados interativa (jornadas taker/maker, testes críticos de segurança incl. o do relógio absoluto, reembolsos, transições inválidas).
 - `chain` (8): mapeamento Swap→ObservedLock (`exists` = trava ativa) + junção com a verificação + **integração REAL contra anvil** (sobe nó, deploy do HTLC, `newSwap`, leitura via `RpcVerifier`, e a junção leitura→verificação→decisão da máquina de estados). O antigo stub `#[ignore]` foi **implementado**.
 - `handshake` (5): **atribuição DETERMINÍSTICA de papéis** (Taker/Maker) + derivação do `SwapContext`, PURA (recebe as duas ordens como input, agnóstica ao transporte). Regra: repouso (menor `created_at`) = Maker; quem cruza = Taker; empate → menor digest EIP-712 = Maker. Provas: papéis complementares dos dois lados (incl. desempate por digest) e **divergência de papel NÃO perde fundos** (ambos-Maker → swap não inicia; ambos-Taker → Unsafe/`TimelockInverted` → segredo nunca revelado → refund).
+- `exec` (19): signer com allowlist local/testnet, envio de `lock`/`redeem`/`refund`, observação por hashlock, confirmação por profundidade, executor `step()`/`run()` com relógio injetável e re-verificação anti-TOCTOU. Inclui e2e local com dois anvils e dois executores: Taker lock → Maker lock → Taker redeem → Maker aprende segredo → Maker redeem.
 
 ---
 
@@ -91,11 +92,13 @@ Decisões já tomadas, mas ainda sem implementação:
 
 ## 3. ABERTO / A CONSTRUIR
 
-- **O executor.** A camada que pega a `NextAction` da máquina de estados e a executa
-  no mundo: assinar e enviar transações reais (travar, resgatar, reembolsar), gerar o
-  segredo, observar confirmações. Hoje a máquina **decide**; nada **executa**.
-- **Integração ponta a ponta.** Ligar livro → match → máquina de estados → executor →
-  chains num fluxo real. As peças existem isoladas; a costura completa não.
+- ~~**O executor.**~~ **FEITO para o escopo local/anvil direto HTLC.** A camada pega
+  a `NextAction` da máquina de estados, re-observa, re-verifica e só então envia
+  `lock`/`redeem`/`refund`. Continua fora do escopo: produção, mainnet, fundos reais,
+  fee bump/RBF e recuperação persistente completa.
+- **Integração ponta a ponta completa.** Livro → match → handshake p2p → executor →
+  chains ainda não está todo costurado. O marco local atual cobre dois executores
+  diretos sobre HTLC nativo em duas chains anvil.
 - ~~**Teste de integração real contra anvil.**~~ **FEITO.**
   `swapkit/src/chain.rs::rpc_verifier_reads_real_chain_and_drives_wallet` sobe
   anvil, faz deploy do HTLC, cria a trava, lê via `RpcVerifier` e ainda junta
@@ -119,7 +122,7 @@ Decisões já tomadas, mas ainda sem implementação:
 Foundry  : 36 testes  (HashedTimelock 9, Order 10, Settlement 16, Vector 1)
 orderbook: 26 testes  (lib 25 + integração 1)
 maestro  :  9 testes  (lib 6 + e2e 2 + full_flow 1)
-swapkit  : 43 testes  (verify 19 + sm 11 + chain 8 + handshake 5, incl. anvil real)
+swapkit  : 64 testes  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 19, incl. anvil real)
 ---------------------------------------------------------------
-TOTAL    : 114 passando, 0 ignorados
+TOTAL    : 135 passando, 0 ignorados
 ```

@@ -3,8 +3,8 @@
 Protocolo de swap atômico **não-custodial**. As peças centrais (HTLC, ordem
 assinada, livro, liquidador, verificação de carteira) existem e são testadas —
 inclusive a leitura de chain **contra um nó real (anvil)**. O fluxo ponta a ponta
-conduzido por um **executor único** ainda é trabalho aberto (ver
-`docs/ESTADO.md`).
+conduzido por executor local direto HTLC já existe para o teste de desenvolvimento
+(ver `docs/DEV_TEST_RUNBOOK.md` e `docs/ESTADO.md`).
 
 > **Regra inviolável:** nada toca fundos reais antes de auditoria profissional
 > independente. Todo este código é experimental, não-auditado, para testnet/local.
@@ -18,19 +18,17 @@ conduzido por um **executor único** ainda é trabalho aberto (ver
 | 3 | Liquidador (`Settlement.sol`) | `contracts/` | ✅ 16 testes |
 | 4 | Matching + servidor do livro | `orderbook/` | ✅ 26 testes |
 | 5 | Maestro (observador/correlação) | `maestro/` | ✅ 9 testes (2 anvils) |
-| 6 | Swapkit (verificação + máquina de estados da carteira) | `swapkit/` | ✅ 38 testes (1 contra anvil real) |
+| 6 | Swapkit (verificação + máquina de estados + executor local) | `swapkit/` | ✅ 64 testes (incl. anvil real + e2e executor) |
 
-**Total: 109 testes verdes, 0 ignorados** (36 Foundry + 73 Rust).
+**Total: 135 testes verdes, 0 ignorados** (36 Foundry + 99 Rust).
 
 > **Honestidade sobre o estado (leia `docs/ESTADO.md`):** os componentes acima
 > são provados *isoladamente* e em algumas junções reais (livro→match;
 > trava→correlação no maestro; leitura-de-chain→verificação→decisão no swapkit
-> contra anvil). O que **ainda NÃO existe**: (a) um **executor** que pega a
-> `NextAction` da máquina de estados e assina/envia as transações reais; (b) o
-> **handshake de papéis** (quem é taker/maker, geração e acordo do hashlock,
-> troca de endereços de recipient por chain); (c) a costura `Settlement` ↔
-> carteira num fluxo único. Sem isso, um swap real ainda é conduzido por código
-> de teste, não pelo software.
+> contra anvil; executor local direto HTLC em duas chains anvil). O que **ainda NÃO
+> existe**: (a) transporte p2p de liquidação; (b) costura completa livro→match→p2p
+> handshake→executor; (c) `Settlement` ↔ carteira num fluxo único. O executor local
+> é um marco de desenvolvimento, não prontidão para fundos reais.
 
 ## Invariantes de fundação
 
@@ -89,6 +87,9 @@ cd contracts && forge test
 
 # Rust (camadas 4–6) — e2e/anvil sobem nós locais automaticamente
 cd .. && cargo test --workspace
+
+# Marco local de desenvolvimento: dois executores, dois anvils, HTLC direto
+./scripts/run_dev_swap_test.sh
 ```
 
 ## Como rodar os serviços
@@ -108,8 +109,8 @@ cargo run -p maestro --bin maestro
 Honestamente não construídos — têm decisões de fundação a fechar antes de codar
 (detalhe em `docs/ESTADO.md`):
 
-- **Executor + handshake de papéis** — a costura que transforma "match + decisão"
-  em "swap executado". A peça mais importante que ainda falta.
+- **Transporte p2p + integração completa com livro/Settlement** — a costura de
+  produto que transforma descoberta de match em swap conduzido ponta a ponta.
 - **Profundidade de confirmação (anti-reorg)** e quórum de nós na leitura de chain.
 - **Liquidez/makers** — o *free-option problem* e o incentivo de liquidez.
 - **Bitcoin nativo** (a SHA-256 mantém essa porta aberta) e Solana.
