@@ -1,22 +1,36 @@
 # Kael — Protocolo de Swap Atômico Cross-Chain (MVP EVM↔EVM)
 
-Protocolo de swap atômico **não-custodial**, construído seguindo o mapa do guia
-(Partes 0–6). Núcleo demonstrável: um swap cross-chain EVM↔EVM funciona de ponta
-a ponta em ambiente local, sem nenhum componente tocar fundos fora dos HTLCs.
+Protocolo de swap atômico **não-custodial**. As peças centrais (HTLC, ordem
+assinada, livro, liquidador, verificação de carteira) existem e são testadas —
+inclusive a leitura de chain **contra um nó real (anvil)**. O fluxo ponta a ponta
+conduzido por um **executor único** ainda é trabalho aberto (ver
+`docs/ESTADO.md`).
 
 > **Regra inviolável:** nada toca fundos reais antes de auditoria profissional
 > independente. Todo este código é experimental, não-auditado, para testnet/local.
 
-## Arquitetura (4 camadas)
+## Componentes
 
-| Camada | Componente | Onde | Estado |
-|--------|-----------|------|--------|
-| 1 | HTLC (`HashedTimelock.sol`) | `contracts/` | ✅ 8 testes |
-| 2 | Ordem assinada EIP-712 (`Order.sol`) | `contracts/` | ✅ 7 testes |
-| 3 | Matching + servidor do livro | `orderbook/` | ✅ 21 testes |
-| 4 | Maestro (observador) | `maestro/` | ✅ 9 testes |
+| # | Componente | Onde | Estado |
+|---|-----------|------|--------|
+| 1 | HTLC (`HashedTimelock.sol`) | `contracts/` | ✅ 9 testes |
+| 2 | Ordem assinada EIP-712 (`Order.sol`) | `contracts/` | ✅ 10 testes |
+| 3 | Liquidador (`Settlement.sol`) | `contracts/` | ✅ 16 testes |
+| 4 | Matching + servidor do livro | `orderbook/` | ✅ 26 testes |
+| 5 | Maestro (observador/correlação) | `maestro/` | ✅ 9 testes (2 anvils) |
+| 6 | Swapkit (verificação + máquina de estados da carteira) | `swapkit/` | ✅ 38 testes (1 contra anvil real) |
 
-**Total: 46 testes verdes** (16 Foundry + 30 Rust).
+**Total: 109 testes verdes, 0 ignorados** (36 Foundry + 73 Rust).
+
+> **Honestidade sobre o estado (leia `docs/ESTADO.md`):** os componentes acima
+> são provados *isoladamente* e em algumas junções reais (livro→match;
+> trava→correlação no maestro; leitura-de-chain→verificação→decisão no swapkit
+> contra anvil). O que **ainda NÃO existe**: (a) um **executor** que pega a
+> `NextAction` da máquina de estados e assina/envia as transações reais; (b) o
+> **handshake de papéis** (quem é taker/maker, geração e acordo do hashlock,
+> troca de endereços de recipient por chain); (c) a costura `Settlement` ↔
+> carteira num fluxo único. Sem isso, um swap real ainda é conduzido por código
+> de teste, não pelo software.
 
 ## Invariantes de fundação
 
@@ -27,21 +41,29 @@ a ponta em ambiente local, sem nenhum componente tocar fundos fora dos HTLCs.
 3. **Equivalência on-chain/off-chain** — a verificação EIP-712 em Rust recupera
    exatamente o mesmo maker que o `Order.sol`, provado por vetor fixo
    (`vectors/eip712_order.json`).
-4. **Não-custódia** — servidor e maestro nunca movem, congelam ou priorizam
-   fundos. No pior caso, param.
-5. **Matching neutro** — função pura, price-time determinístico, `now` é parâmetro.
+4. **Não-custódia** — servidor, maestro e `Settlement` nunca movem, congelam ou
+   priorizam fundos a favor de terceiros. No pior caso, param; o reembolso vai
+   sempre ao maker.
+5. **Matching neutro** — função pura, price-time determinístico, `now` é
+   parâmetro — e o caminho **servido** pelo livro respeita essa ordem (ADR-004).
+6. **HTLC canônico no liquidador** — o `Settlement` trava só no HTLC fixado no
+   deploy (imutável), nunca num endereço fornecido na chamada.
+7. **Segurança de timelock relativa E absoluta** — a carteira só age contra a
+   perna oposta se o gap inter-pernas E a janela de relógio (`now + min_gap`)
+   forem seguros; o segredo nunca vaza contra uma perna prestes a expirar.
 
 ## Estrutura
 
 ```
 kael/
 ├── contracts/                 Foundry (Solidity)
-│   ├── src/HashedTimelock.sol  Camada 1 — trava/resgata/reembolsa (SHA-256)
-│   ├── src/Order.sol           Camada 2 — OrderLib EIP-712 chain-agnóstico
-│   └── test/                   HashedTimelock.t, Order.t, Vector.t
+│   ├── src/HashedTimelock.sol  trava/resgata/reembolsa (SHA-256)
+│   ├── src/Order.sol           OrderLib EIP-712 chain-agnóstico
+│   ├── src/Settlement.sol      liga ordem assinada ↔ HTLC (Abordagem A)
+│   └── test/                   HashedTimelock.t, Order.t, Settlement.t, Vector.t
 ├── orderbook/                 Crate Rust
 │   ├── src/order.rs            ordem do livro (espelha Order.sol + created_at)
-│   ├── src/matching.rs         Camada 3 — matching puro price-time
+│   ├── src/matching.rs         matching puro price-time (fonte única do ranking)
 │   ├── src/eip712.rs           verificação EIP-712 em Rust (== Order.sol) + sign
 │   ├── src/book.rs             estado em memória + ingestão verificada na borda
 │   ├── src/server.rs           HTTP (axum): POST /orders, GET /matches
@@ -50,23 +72,24 @@ kael/
 │   ├── src/hashlock.rs         fonte única do hashlock SHA-256
 │   ├── src/correlate.rs        SwapTracker — correlação + watchdog
 │   ├── src/watcher.rs          observação on-chain (alloy)
-│   └── tests/                  e2e (2 anvils) + full_flow (Parte 6)
+│   └── tests/                  e2e (2 anvils) + full_flow
+├── swapkit/                   Crate Rust (a carteira/SDK)
+│   ├── src/verify.rs           verificação da perna oposta (gap + janela de relógio)
+│   ├── src/sm.rs               máquina de estados interativa (decide, não executa)
+│   ├── src/chain.rs            leitura de chain (RpcVerifier) + teste real anvil
+│   └── ...
 └── vectors/eip712_order.json  vetor de equivalência on-chain/off-chain
 ```
 
 ## Como rodar os testes
 
 ```bash
-# Camadas 1 e 2 (contratos)
+# Contratos (camadas 1–3)
 cd contracts && forge test
 
-# Camadas 3 e 4 (Rust) — o e2e sobe anvils locais automaticamente
+# Rust (camadas 4–6) — e2e/anvil sobem nós locais automaticamente
 cd .. && cargo test --workspace
 ```
-
-O teste capstone (`maestro/tests/full_flow.rs`) demonstra o MVP inteiro:
-livro casa ordens assinadas → carteiras liquidam via HTLC em duas chains →
-maestro correlaciona pelo hashlock e captura o preimage.
 
 ## Como rodar os serviços
 
@@ -82,9 +105,13 @@ cargo run -p maestro --bin maestro
 
 ## Fora do escopo deste MVP (fundação em aberto)
 
-Honestamente não construídos — têm decisões de fundação a fechar antes de codar:
+Honestamente não construídos — têm decisões de fundação a fechar antes de codar
+(detalhe em `docs/ESTADO.md`):
 
-- **Parte 7** — liquidez/makers: o *free-option problem* e o incentivo de
-  liquidez não estão resolvidos.
-- **Parte 8** — Bitcoin nativo (a SHA-256 mantém essa porta aberta) e Solana.
-- **Parte 9** — auditoria, modelo de fee, descentralização do livro.
+- **Executor + handshake de papéis** — a costura que transforma "match + decisão"
+  em "swap executado". A peça mais importante que ainda falta.
+- **Profundidade de confirmação (anti-reorg)** e quórum de nós na leitura de chain.
+- **Liquidez/makers** — o *free-option problem* e o incentivo de liquidez.
+- **Bitcoin nativo** (a SHA-256 mantém essa porta aberta) e Solana.
+- **Auditoria profissional independente** — inviolável antes de qualquer valor real.
+```

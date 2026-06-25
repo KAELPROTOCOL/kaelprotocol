@@ -94,22 +94,29 @@ impl<V: SignatureVerifier> Book<V> {
 
     /// Informa todos os pares compatíveis que envolvem `maker` (modelo pull).
     /// SÓ INFORMA — não executa nada. `now` é parâmetro.
+    ///
+    /// ADR-004 (price-time NO CAMINHO SERVIDO): para cada ordem do `maker`, os
+    /// candidatos compatíveis são devolvidos em ordem PRICE-TIME (melhor maker
+    /// primeiro), via [`matching::cmp_makers_for_taker`] — a MESMA ordem total do
+    /// matcher puro. Sem isto, a API expunha pares numa ordem arbitrária (de
+    /// inserção) e a prioridade price-time ficava só no módulo, nunca servida.
     pub fn matches_for(&self, maker: &Address, now: u64) -> Vec<MatchPair> {
         let mut out = Vec::new();
         for (i, taker) in self.orders.iter().enumerate() {
             if &taker.maker != maker {
                 continue;
             }
-            for (j, cand) in self.orders.iter().enumerate() {
-                if i == j {
-                    continue;
-                }
-                if matching::compatible(taker, cand, now) {
-                    out.push(MatchPair {
-                        taker_hash: self.hashes[i],
-                        maker_hash: self.hashes[j],
-                    });
-                }
+            // candidatos compatíveis (índices), exceto a própria ordem
+            let mut cands: Vec<usize> = (0..self.orders.len())
+                .filter(|&j| j != i && matching::compatible(taker, &self.orders[j], now))
+                .collect();
+            // ordena por price-time: melhor maker primeiro, determinístico
+            cands.sort_by(|&x, &y| matching::cmp_makers_for_taker(&self.orders[x], &self.orders[y]));
+            for j in cands {
+                out.push(MatchPair {
+                    taker_hash: self.hashes[i],
+                    maker_hash: self.hashes[j],
+                });
             }
         }
         out
@@ -219,5 +226,31 @@ mod tests {
         b.submit(mirror(0xBB, 2, 1000), b"ok", 500).unwrap();
         let m = b.matches_for(&[0xAA; 20], 500);
         assert_eq!(m.len(), 1);
+    }
+
+    // ADR-004 no caminho SERVIDO: com dois makers compatíveis, o de melhor preço
+    // (maior sell_amount → mais Y para o taker) é informado PRIMEIRO. Antes do
+    // fix, a ordem era a de inserção (arbitrária) e o price-time não era servido.
+    #[test]
+    fn served_matches_are_price_time_ordered() {
+        let mut b = Book::new(AcceptVerifier);
+        b.submit(order(0xAA, 1, 1000), b"ok", 500).unwrap(); // taker
+
+        let mut m_meh = mirror(0xBB, 2, 1000);
+        m_meh.sell_amount = 200; // dá 200 Y
+        let mut m_best = mirror(0xCC, 3, 1000);
+        m_best.sell_amount = 300; // dá 300 Y → melhor preço para o taker
+        // inserido o "meh" ANTES do "best": só o price-time pode reordenar
+        b.submit(m_meh, b"ok", 500).unwrap();
+        b.submit(m_best, b"ok", 500).unwrap();
+
+        let m = b.matches_for(&[0xAA; 20], 500);
+        assert_eq!(m.len(), 2);
+
+        // hash do AcceptVerifier = maker[..20] ‖ nonce[24..32]
+        let mut best_hash = [0u8; 32];
+        best_hash[..20].copy_from_slice(&[0xCC; 20]);
+        best_hash[24..].copy_from_slice(&3u64.to_be_bytes());
+        assert_eq!(m[0].maker_hash, best_hash, "melhor preço deve ser servido primeiro");
     }
 }

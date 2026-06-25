@@ -11,7 +11,7 @@
 
 ## 1. CONSTRUÍDO E TESTADO
 
-**Total: 102 testes passando + 1 ignorado** (36 Foundry + 66 Rust).
+**Total: 109 testes passando, 0 ignorados** (36 Foundry + 73 Rust).
 
 ### Contratos (Foundry) — 36 testes
 | Suíte | Testes | Cobre |
@@ -21,8 +21,8 @@
 | `Settlement.t.sol` | 16 | liquidação Abordagem A: autorização+nonce, binding de chain, maker-only (ETH+ERC-20), replay, reembolso ao maker, não-custódia |
 | `Vector.t.sol` | 1 | gera o vetor de equivalência EIP-712 on-chain/off-chain |
 
-### `orderbook` (Rust) — 25 testes
-- `lib` (24): matching puro price-time, verificação EIP-712 (equivalência com o contrato, provada por vetor), livro em memória + ingestão verificada na borda.
+### `orderbook` (Rust) — 26 testes
+- `lib` (25): matching puro price-time, verificação EIP-712 (equivalência com o contrato, provada por vetor), livro em memória + ingestão verificada na borda, e **price-time no caminho SERVIDO** (`matches_for` ordena por melhor preço; fonte única de ranking em `matching::cmp_makers_for_taker`).
 - `server_integration` (1): servidor HTTP real — ingestão verificada + consulta de matches.
 
 ### `maestro` (Rust) — 9 testes
@@ -30,10 +30,10 @@
 - `e2e` (2): dois anvils, deploy do HTLC, swap correlacionado + preimage capturado; watchdog de expiração.
 - `full_flow` (1): capstone livro→liquidação→maestro.
 
-### `swapkit` (Rust) — 32 testes + 1 ignorado
-- `verify` (15): verificador de perna oposta (hashlock/token/amount/recipient + gap de timelock assimétrico por papel).
-- `sm` (10): máquina de estados interativa (jornadas taker/maker, dois testes críticos de segurança, reembolsos, transições inválidas).
-- `chain` (7 + **1 ignorado**): mapeamento Swap→ObservedLock (`exists` = trava ativa) + junção com a verificação. O teste de **integração real contra anvil** está `#[ignore]` (ver §3).
+### `swapkit` (Rust) — 38 testes, 0 ignorados
+- `verify` (19): verificador de perna oposta (hashlock/token/amount/recipient + gap de timelock assimétrico por papel) **+ janela de relógio absoluta**: a perna oposta não pode expirar em menos de `now + min_gap` — fecha o vetor de "segredo revelado contra perna prestes a expirar".
+- `sm` (11): máquina de estados interativa (jornadas taker/maker, testes críticos de segurança incl. o do relógio absoluto, reembolsos, transições inválidas).
+- `chain` (8): mapeamento Swap→ObservedLock (`exists` = trava ativa) + junção com a verificação + **integração REAL contra anvil** (sobe nó, deploy do HTLC, `newSwap`, leitura via `RpcVerifier`, e a junção leitura→verificação→decisão da máquina de estados). O antigo stub `#[ignore]` foi **implementado**.
 
 ---
 
@@ -65,11 +65,11 @@ Decisões já tomadas, mas ainda sem implementação:
   segredo, observar confirmações. Hoje a máquina **decide**; nada **executa**.
 - **Integração ponta a ponta.** Ligar livro → match → máquina de estados → executor →
   chains num fluxo real. As peças existem isoladas; a costura completa não.
-- **Teste de integração real contra anvil.** `swapkit/src/chain.rs` tem o stub
-  `rpc_verifier_against_real_chain_pending` marcado `#[ignore]`. Os testes atuais
-  provam o parsing/montagem e a junção com a verificação — **não** a leitura real de
-  um nó. Falta subir anvil, fazer deploy do HTLC, criar um swap e ler via
-  `RpcVerifier`.
+- ~~**Teste de integração real contra anvil.**~~ **FEITO.**
+  `swapkit/src/chain.rs::rpc_verifier_reads_real_chain_and_drives_wallet` sobe
+  anvil, faz deploy do HTLC, cria a trava, lê via `RpcVerifier` e ainda junta
+  leitura→verificação→decisão da máquina de estados. Não é mais `#[ignore]`. O que
+  permanece aberto aqui é a **profundidade de confirmação** (anti-reorg) na leitura.
 - **A perna Bitcoin.** O diferencial central e a parte mais difícil. A leitura
   trustless do Bitcoin (SPV/prova de inclusão) é um projeto próprio ("Keystone"). A
   escolha de SHA-256 (ADR-001) mantém essa porta aberta, mas a fundação do Bitcoin
@@ -86,9 +86,9 @@ Decisões já tomadas, mas ainda sem implementação:
 
 ```
 Foundry  : 36 testes  (HashedTimelock 9, Order 10, Settlement 16, Vector 1)
-orderbook: 25 testes  (lib 24 + integração 1)
+orderbook: 26 testes  (lib 25 + integração 1)
 maestro  :  9 testes  (lib 6 + e2e 2 + full_flow 1)
-swapkit  : 32 testes  (verify 15 + sm 10 + chain 7) + 1 ignorado (integração real)
+swapkit  : 38 testes  (verify 19 + sm 11 + chain 8, incl. integração real anvil)
 ---------------------------------------------------------------
-TOTAL    : 102 passando + 1 ignorado
+TOTAL    : 109 passando, 0 ignorados
 ```

@@ -47,8 +47,15 @@ pub struct LegExpectation {
     pub expected_recipient: Address,
     /// o timelock da MINHA perna.
     pub my_timelock: u64,
-    /// gap mínimo seguro entre os timelocks das duas pernas.
+    /// gap mínimo seguro entre os timelocks das duas pernas. Também é a janela
+    /// MÍNIMA de relógio exigida da perna oposta a partir de `now` (ver abaixo).
     pub min_gap: u64,
+    /// tempo atual (parâmetro — sem relógio do sistema). Usado para garantir que
+    /// a perna oposta não está prestes a expirar AGORA: o gap entre as pernas é
+    /// condição necessária mas NÃO suficiente — se a perna oposta expira em menos
+    /// de `min_gap` a partir de `now`, agir contra ela (revelar o segredo / travar
+    /// a perna do respondente) é inseguro mesmo com o gap inter-pernas correto.
+    pub now: u64,
     pub role: Role,
 }
 
@@ -67,6 +74,12 @@ pub enum UnsafeReason {
     TimelockGapTooSmall,
     /// a perna oposta está do lado ERRADO (degenerado): não me dá janela alguma.
     TimelockInverted,
+    /// a perna oposta está estruturalmente correta (lado certo, gap inter-pernas
+    /// ok), mas expira perto demais de AGORA (`< now + min_gap`): não há janela de
+    /// relógio para agir contra ela. Agir mesmo assim vazaria o segredo (taker) ou
+    /// comprometeria fundos sem poder resgatar a tempo. ESTE é o furo do
+    /// "segredo revelado contra perna prestes a expirar".
+    CounterpartyExpiresTooSoon,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,8 +154,10 @@ fn check_timelock_gap(expectation: &LegExpectation, observed: &ObservedLock) -> 
     let my = expectation.my_timelock;
     let opp = observed.timelock;
     let gap = expectation.min_gap;
+    let now = expectation.now;
 
-    match expectation.role {
+    // (1) ESTRUTURAL: a perna oposta está do lado certo, com gap inter-pernas.
+    let structural = match expectation.role {
         Role::Maker => {
             // a perna oposta (Taker) deve ser MAIOR que a minha, com margem.
             if opp <= my {
@@ -163,7 +178,23 @@ fn check_timelock_gap(expectation: &LegExpectation, observed: &ObservedLock) -> 
                 None
             }
         }
+    };
+    if structural.is_some() {
+        return structural;
     }
+
+    // (2) RELÓGIO ABSOLUTO: o gap inter-pernas é necessário mas NÃO suficiente.
+    //     Quem age (o taker revelando o segredo; o maker que vai depender de
+    //     resgatar) precisa de janela REAL a partir de `now` para minerar a tx
+    //     contra a perna oposta antes que ela expire. Exigimos pelo menos
+    //     `min_gap` de folga: opp deve estar a >= now + gap. Caso contrário, a
+    //     perna está estruturalmente certa mas temporalmente inviável — e agir
+    //     (revelar o segredo) seria inseguro. Convenção de fronteira idêntica à
+    //     do gap inter-pernas: opp == now + gap é seguro (folga exata).
+    if opp < now.saturating_add(gap) {
+        return Some(UnsafeReason::CounterpartyExpiresTooSoon);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -191,6 +222,7 @@ mod tests {
             expected_recipient: a(ME),
             my_timelock: 1000,
             min_gap: 100,
+            now: 0, // longe da expiração nos vetores base
             role: Role::Maker,
         }
     }
@@ -216,6 +248,7 @@ mod tests {
             expected_recipient: a(ME),
             my_timelock: 2000,
             min_gap: 100,
+            now: 0, // longe da expiração nos vetores base
             role: Role::Taker,
         }
     }
@@ -374,6 +407,59 @@ mod tests {
         o.timelock = 2000; // == my → lado errado
         assert_eq!(
             verify_counterparty_leg(&taker_exp(), &o),
+            VerifyOutcome::Unsafe(UnsafeReason::TimelockInverted)
+        );
+    }
+
+    // ---- relógio absoluto: perna estruturalmente OK mas expirando AGORA ----
+
+    // FURO FECHADO: o taker NÃO deve considerar Safe uma perna do maker que,
+    // embora com gap inter-pernas correto, expira perto demais de `now`. Sem
+    // isto, o taker revelaria o segredo sem janela para resgatar → segredo vaza.
+    #[test]
+    fn taker_unsafe_when_counterparty_expires_too_soon() {
+        let mut e = taker_exp();
+        // perna do maker em 1800 (gap inter-pernas ok: 1800+100 <= 2000), MAS
+        // now=1750 → 1800 < 1750+100=1850 → janela de relógio insuficiente.
+        e.now = 1750;
+        let o = obs_for_taker(); // timelock 1800
+        assert_eq!(
+            verify_counterparty_leg(&e, &o),
+            VerifyOutcome::Unsafe(UnsafeReason::CounterpartyExpiresTooSoon)
+        );
+    }
+
+    // fronteira: opp == now + gap é seguro (folga de relógio exata).
+    #[test]
+    fn safe_at_exact_now_window_boundary() {
+        let mut e = taker_exp();
+        e.now = 1700; // 1800 == 1700 + 100 → folga exata, Safe
+        assert_eq!(verify_counterparty_leg(&e, &obs_for_taker()), VerifyOutcome::Safe);
+    }
+
+    // vale também para o maker: perna do taker do lado certo mas expirando já.
+    #[test]
+    fn maker_unsafe_when_counterparty_expires_too_soon() {
+        let mut e = maker_exp();
+        let mut o = obs_for_maker();
+        o.timelock = 5000; // bem do lado certo (>> my=1000+gap)
+        e.now = 4950; // mas 5000 < 4950 + 100 → sem janela de relógio
+        assert_eq!(
+            verify_counterparty_leg(&e, &o),
+            VerifyOutcome::Unsafe(UnsafeReason::CounterpartyExpiresTooSoon)
+        );
+    }
+
+    // ordem: a falha ESTRUTURAL (lado errado/gap) tem prioridade sobre a de
+    // relógio — um leg invertido reporta TimelockInverted, não ExpiresTooSoon.
+    #[test]
+    fn structural_failure_precedes_clock_failure() {
+        let mut e = taker_exp();
+        e.now = 5000; // tudo "expira" vs now
+        let mut o = obs_for_taker();
+        o.timelock = 2500; // >= my(2000) → invertido (lado errado)
+        assert_eq!(
+            verify_counterparty_leg(&e, &o),
             VerifyOutcome::Unsafe(UnsafeReason::TimelockInverted)
         );
     }

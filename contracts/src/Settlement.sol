@@ -35,6 +35,20 @@ interface IERC20 {
 ///           - não-custódia: duas saídas de fundos só, HTLC ou refundLeg→maker.
 ///         Sem dono, sem saque, sem selfdestruct, sem chamada arbitrária.
 contract Settlement {
+    // ---- imutáveis ----
+
+    /// O ÚNICO HashedTimelock que este Settlement usa, FIXADO NO DEPLOY. Deixou
+    /// de ser parâmetro de chamada: fecha o footgun de um `htlc` arbitrário/maligno
+    /// passado pelo chamador — antes, o contrato fazia transferFrom dos fundos do
+    /// maker para si e então `approve`/`newSwap` num endereço não-confiável fornecido
+    /// na própria chamada. Agora a trava só pode ir ao HTLC canônico desta chain.
+    address public immutable htlc;
+
+    constructor(address htlc_) {
+        if (htlc_ == address(0)) revert ZeroHtlc();
+        htlc = htlc_;
+    }
+
     // ---- estado ----
 
     /// maker → nonce → consumido. Anti-replay per-chain por (maker, nonce).
@@ -43,7 +57,6 @@ contract Settlement {
     /// Registro por trava (contractId no HTLC) para o reembolso.
     struct Leg {
         address maker; // dono real dos fundos — para quem o reembolso SEMPRE vai
-        address htlc; // qual HTLC guarda a trava
         address token; // address(0) = ETH
         uint256 amount;
         bool refunded; // guarda de reembolso no nível do Settlement
@@ -66,6 +79,7 @@ contract Settlement {
 
     // ---- erros ----
 
+    error ZeroHtlc();
     error NonceAlreadyUsed();
     error WrongChain();
     error NotOrderMaker();
@@ -105,14 +119,14 @@ contract Settlement {
     /// @param recipient quem poderá resgatar com o preimage (a contraparte do match)
     /// @param hashlock hashlock SHA-256 acordado off-chain (a carteira garante o mesmo nas duas pernas)
     /// @param timelock timelock desta perna (a carteira garante a assimetria segura)
-    /// @param htlc endereço do HashedTimelock desta chain
+    /// @dev O HTLC é o canônico imutável (`htlc`), fixado no deploy — NÃO é mais
+    ///      parâmetro. A trava nunca pode ir a um endereço fornecido na chamada.
     function settleLeg(
         OrderLib.Order calldata order,
         bytes calldata signature,
         address recipient,
         bytes32 hashlock,
-        uint256 timelock,
-        address htlc
+        uint256 timelock
     ) external payable returns (bytes32 contractId) {
         // a) verifica assinatura + validade desta ordem (reverte se inválida/expirada)
         OrderLib.verify(order, signature, block.timestamp);
@@ -139,10 +153,10 @@ contract Settlement {
 
         // e) REGISTRO para reembolso (antes de qualquer interação externa — CEI).
         legs[contractId] =
-            Leg({maker: order.maker, htlc: htlc, token: order.sellToken, amount: order.sellAmount, refunded: false});
+            Leg({maker: order.maker, token: order.sellToken, amount: order.sellAmount, refunded: false});
 
-        // f-g) recebe os fundos autorizados e trava no HTLC, em nome próprio
-        _receiveAndLock(order, recipient, hashlock, timelock, htlc, contractId);
+        // f-g) recebe os fundos autorizados e trava no HTLC canônico, em nome próprio
+        _receiveAndLock(order, recipient, hashlock, timelock, contractId);
 
         // h) evento
         emit SwapLegSettled(contractId, order.maker, recipient, hashlock, timelock);
@@ -156,7 +170,6 @@ contract Settlement {
         address recipient,
         bytes32 hashlock,
         uint256 timelock,
-        address htlc,
         bytes32 contractId
     ) private {
         bytes32 got;
@@ -191,10 +204,10 @@ contract Settlement {
         address maker = leg.maker;
         address token = leg.token;
         uint256 amount = leg.amount;
-        address htlc = leg.htlc;
 
-        // os fundos voltam para o Settlement (que é o sender da trava no HTLC).
-        // se a perna já foi resgatada ou ainda não expirou, o HTLC reverte aqui.
+        // os fundos voltam para o Settlement (que é o sender da trava no HTLC
+        // canônico imutável). Se a perna já foi resgatada ou ainda não expirou, o
+        // HTLC reverte aqui.
         IHashedTimelock(htlc).refund(contractId);
 
         // repassa ao maker real.
