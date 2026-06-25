@@ -1,8 +1,9 @@
 use alloy::primitives::{Address as EvmAddress, B256};
+use alloy::providers::{Provider, ProviderBuilder};
 use maestro::hashlock_from_preimage;
 use rand::RngCore;
 use std::time::Duration;
-use swapkit::exec::signer::Signer;
+use swapkit::exec::signer::{assert_chain_allowed, Signer};
 use swapkit::exec::{rpc_observer, Clock, SystemClock, WalletExecutor, WalletExecutorConfig};
 use swapkit::{Address, Role, SwapContext, SwapState};
 
@@ -63,6 +64,21 @@ async fn run() -> Result<(), RunnerError> {
             "timelocks invalidos: taker_lock_secs deve ser >= maker_lock_secs + min_gap".into(),
         ));
     }
+
+    validate_htlc_contract(
+        "A",
+        &config.taker.rpc,
+        config.taker.chain_id,
+        config.taker.htlc,
+    )
+    .await?;
+    validate_htlc_contract(
+        "B",
+        &config.maker.rpc,
+        config.maker.chain_id,
+        config.maker.htlc,
+    )
+    .await?;
 
     let taker_own = Signer::from_key_str(&config.taker.key, &config.taker.rpc)
         .await
@@ -210,6 +226,47 @@ fn require_explicit_send_confirmation() -> Result<(), RunnerError> {
             "defina KAEL_CLOSED_TESTNET_SEND_TX={expected} para permitir envio em testnet fechada"
         ))),
     }
+}
+
+async fn validate_htlc_contract(
+    name: &str,
+    rpc: &str,
+    expected_chain_id: u64,
+    htlc: Address,
+) -> Result<(), RunnerError> {
+    let htlc_address = EvmAddress::from(htlc);
+    if htlc_address == EvmAddress::ZERO {
+        return Err(RunnerError(format!(
+            "KAEL_HTLC_{name} invalido: endereco zero nao e contrato HTLC valido"
+        )));
+    }
+
+    let rpc_url = rpc
+        .parse()
+        .map_err(|e| RunnerError(format!("KAEL_RPC_{name} invalido: {e}")))?;
+    let provider = ProviderBuilder::new().connect_http(rpc_url);
+    let chain_id = provider
+        .get_chain_id()
+        .await
+        .map_err(|e| RunnerError(format!("RPC {name} falhou ao ler chain_id: {e}")))?;
+    if chain_id != expected_chain_id {
+        return Err(RunnerError(format!(
+            "KAEL_CHAIN_{name} esperado {expected_chain_id}, RPC retornou {chain_id}"
+        )));
+    }
+    assert_chain_allowed(chain_id).map_err(|e| RunnerError(format!("{e}")))?;
+
+    let code = provider
+        .get_code_at(htlc_address)
+        .await
+        .map_err(|e| RunnerError(format!("RPC {name} falhou ao ler HTLC: {e}")))?;
+    if code.is_empty() {
+        return Err(RunnerError(format!(
+            "KAEL_HTLC_{name} invalido: {htlc_address} nao tem bytecode na chain {chain_id}; abortando antes de qualquer broadcast"
+        )));
+    }
+
+    Ok(())
 }
 
 fn read_config() -> Result<SwapConfig, RunnerError> {

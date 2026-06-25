@@ -60,7 +60,7 @@ CLOSED TESTNET PREFLIGHT OK
 Expected closed testnet swap command:
 
 ```bash
-./scripts/run_closed_testnet_swap.sh
+KAEL_CLOSED_TESTNET_SEND_TX=I_UNDERSTAND_THIS_USES_TEST_FUNDS ./scripts/run_closed_testnet_swap.sh
 ```
 
 Expected closed testnet swap marker:

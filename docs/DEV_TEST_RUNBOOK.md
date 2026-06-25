@@ -125,6 +125,8 @@ kill <pid-for-8545-or-8546>
 - Chain ID failure: use only local/closed testnet chain IDs allowed by the signer guard; mainnet is refused.
 - HTLC bytecode failure: deploy `HashedTimelock` on that chain and set the resulting `KAEL_HTLC_*`.
 - Balance failure: fund the configured test signer with faucet/local test ETH.
+- Cross-chain gas failure: fund both configured signers on both closed-testnet chains; the preflight checks `KAEL_SIGNER_KEY_A` and `KAEL_SIGNER_KEY_B` on both RPCs before any lock.
+- Gas threshold: set `KAEL_MIN_GAS_BALANCE_WEI` when the default local/testnet gas minimum is not appropriate.
 - Swap confirmation failure: set `KAEL_CLOSED_TESTNET_SEND_TX=I_UNDERSTAND_THIS_USES_TEST_FUNDS` exactly.
 
 ## Current Limits

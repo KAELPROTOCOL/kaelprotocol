@@ -61,6 +61,7 @@ Optional:
 
 ```bash
 export KAEL_CLOSED_TESTNET_MIN_CONFIRMATIONS=3
+export KAEL_MIN_GAS_BALANCE_WEI=10000000000000000
 export KAEL_CLOSED_TESTNET_MIN_BALANCE_WEI=10000000000000000
 export KAEL_CLOSED_TESTNET_MAX_AMOUNT_WEI=10000000000000000
 export KAEL_TAKER_LOCK_SECS=7200
@@ -95,7 +96,8 @@ Closed developer testnet swap completed.
 - the two legs are on distinct chains;
 - configured HTLC addresses have bytecode;
 - configured signer keys are valid;
-- signer balances meet the minimum faucet/test balance threshold.
+- both configured signers have native gas on both chains before any lock is sent;
+- the signer locking value on each chain also has enough balance for the configured amount when `KAEL_AMOUNT_A_WEI` / `KAEL_AMOUNT_B_WEI` are set.
 
 ## Passing Output
 
