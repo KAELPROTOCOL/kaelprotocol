@@ -65,19 +65,23 @@ pub fn best_match_for(taker: &Order, makers: &[Order], now: u64) -> Option<usize
     best
 }
 
-/// `cand` é estritamente melhor que `cur` para o taker?
-/// Ordem de critérios: maior sell_amount (preço) > menor created_at (tempo) >
-/// menor nonce (desempate determinístico final).
+/// Ordem total price-time entre candidatos a maker, do ponto de vista do taker,
+/// MELHOR primeiro (`Ordering::Less` == melhor). Critérios: maior `sell_amount`
+/// (preço para o taker) > menor `created_at` (mais antigo) > menor `nonce`
+/// (desempate determinístico final). FONTE ÚNICA do ranking price-time — tanto o
+/// matcher puro quanto o caminho servido pelo livro (ADR-004) usam esta função,
+/// para que NÃO divirjam.
+pub fn cmp_makers_for_taker(a: &Order, b: &Order) -> std::cmp::Ordering {
+    b.sell_amount
+        .cmp(&a.sell_amount) // maior sell_amount primeiro
+        .then_with(|| a.created_at.cmp(&b.created_at)) // mais antigo primeiro
+        .then_with(|| a.nonce.cmp(&b.nonce)) // menor nonce primeiro
+}
+
+/// `cand` é estritamente melhor que `cur` para o taker? Delega à ordem total
+/// [`cmp_makers_for_taker`] — uma única definição de "melhor".
 fn better_for_taker(cand: &Order, cur: &Order) -> bool {
-    match cand.sell_amount.cmp(&cur.sell_amount) {
-        std::cmp::Ordering::Greater => true,
-        std::cmp::Ordering::Less => false,
-        std::cmp::Ordering::Equal => match cand.created_at.cmp(&cur.created_at) {
-            std::cmp::Ordering::Less => true,
-            std::cmp::Ordering::Greater => false,
-            std::cmp::Ordering::Equal => cand.nonce < cur.nonce,
-        },
-    }
+    cmp_makers_for_taker(cand, cur) == std::cmp::Ordering::Less
 }
 
 /// Varre todas as ordens e devolve o primeiro par compatível por índices

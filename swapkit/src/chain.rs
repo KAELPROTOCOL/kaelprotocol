@@ -249,6 +249,7 @@ mod tests {
             expected_recipient: a(0x7A),
             my_timelock: 2000,
             min_gap: 100,
+            now: 0,
             role: Role::Taker,
         };
         assert_eq!(verify_counterparty_leg(&exp, &observed), VerifyOutcome::Safe);
@@ -268,6 +269,7 @@ mod tests {
             expected_recipient: a(0x7A),
             my_timelock: 2000,
             min_gap: 100,
+            now: 0,
             role: Role::Taker,
         };
         assert_eq!(
@@ -289,6 +291,7 @@ mod tests {
             expected_recipient: a(0x7A),
             my_timelock: 2000,
             min_gap: 100,
+            now: 0,
             role: Role::Taker,
         };
         assert_eq!(
@@ -298,21 +301,131 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // PENDENTE: integração REAL contra uma chain (anvil). Os testes acima
-    // provam o PARSING/MONTAGEM e a junção com a verificação — NÃO provam a
-    // leitura real de um nó. Esta prova final exige uma chain de verdade
-    // (subir anvil, fazer deploy do HTLC, criar um swap, e ler via RpcVerifier).
-    // Deixado como stub explícito, ignorado, a ser implementado depois.
+    // INTEGRAÇÃO REAL contra uma chain (anvil). Antes era um stub #[ignore]:
+    // os testes acima provam o PARSING/MONTAGEM, mas NÃO a leitura real de um nó.
+    // Esta prova sobe anvil, faz deploy do HTLC, cria uma trava de verdade, e:
+    //   1. lê via RpcVerifier (leitura real, não mock);
+    //   2. alimenta verify_counterparty_leg → Safe (junção read→verify);
+    //   3. dirige a máquina de estados → RedeemCounterpartyLeg (read→decide).
+    // Fecha a costura leitura-real → verificação → decisão da carteira.
     // ----------------------------------------------------------------
+    use crate::sm::{next_action, NextAction, SwapContext, SwapState};
+    use alloy::network::EthereumWallet;
+    use alloy::node_bindings::Anvil;
+    use alloy::primitives::{Address as EvmAddr, B256, U256};
+    use alloy::providers::ProviderBuilder;
+    use alloy::signers::local::PrivateKeySigner;
+    use maestro::hashlock_from_preimage;
+    use maestro::watcher::HashedTimelock;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn now_unix() -> u64 {
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    }
+
     #[tokio::test]
-    #[ignore = "integração real: requer anvil + HTLC com deploy + swap on-chain"]
-    async fn rpc_verifier_against_real_chain_pending() {
-        // Esboço do que esta prova faria (NÃO implementado agora):
-        //   1. subir anvil; deploy do HashedTimelock; newSwap(...) → contractId.
-        //   2. let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
-        //   3. let obs = v.observe_lock(htlc_addr, contract_id).await.unwrap();
-        //   4. assert!(obs.exists && obs.hashlock == ... && obs.amount == ...);
-        // Até isso existir, NÃO afirmamos que a leitura real de chain funciona.
-        let _ = RpcVerifier::new("http://127.0.0.1:8545").unwrap();
+    async fn rpc_verifier_reads_real_chain_and_drives_wallet() {
+        // --- sobe anvil + carteira ---
+        let anvil = Anvil::new().chain_id(10).spawn();
+        let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
+        let sender = signer.address();
+        let wallet = EthereumWallet::from(signer);
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect_http(anvil.endpoint_url());
+
+        // --- deploy do HTLC e criação de uma trava REAL (a perna do maker) ---
+        let htlc = HashedTimelock::deploy(provider.clone()).await.unwrap();
+        let me = [0x7Au8; 20]; // EU (taker): quem pode resgatar a perna do maker
+        let amount_u128: u128 = 500;
+        let preimage = [0x42u8; 32];
+        let hashlock = hashlock_from_preimage(&preimage);
+        let timelock_secs = now_unix() + 3600;
+
+        htlc.newSwap(
+            EvmAddr::from(me),
+            EvmAddr::ZERO, // ETH nativo
+            U256::from(amount_u128),
+            B256::from(hashlock),
+            U256::from(timelock_secs),
+        )
+        .value(U256::from(amount_u128))
+        .send()
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
+
+        let cid: B256 = htlc
+            .computeContractId(
+                sender,
+                EvmAddr::from(me),
+                EvmAddr::ZERO,
+                U256::from(amount_u128),
+                B256::from(hashlock),
+                U256::from(timelock_secs),
+            )
+            .call()
+            .await
+            .unwrap();
+
+        // === LEITURA REAL via RpcVerifier (o que o #[ignore] nunca provava) ===
+        let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
+        let htlc_addr: Address = (*htlc.address()).into_array();
+        let obs = v.observe_lock(htlc_addr, cid.0).await.unwrap();
+
+        assert!(obs.exists, "trava ativa lida da chain real");
+        assert_eq!(obs.hashlock, hashlock);
+        assert_eq!(obs.amount, amount_u128);
+        assert_eq!(obs.recipient, me);
+        assert_eq!(obs.token, [0u8; 20]);
+        assert_eq!(obs.sender, sender.into_array());
+        assert_eq!(obs.timelock, timelock_secs);
+
+        // === a leitura real alimenta a verificação (taker vê a perna do maker) ===
+        let exp = LegExpectation {
+            expected_hashlock: hashlock,
+            expected_token: [0u8; 20],
+            expected_amount: amount_u128,
+            expected_recipient: me,
+            my_timelock: obs.timelock + 100, // minha perna (longa)
+            min_gap: 50,
+            now: now_unix(), // bem antes da expiração → janela ok
+            role: Role::Taker,
+        };
+        assert_eq!(verify_counterparty_leg(&exp, &obs), VerifyOutcome::Safe);
+
+        // === e dirige a máquina de estados: read real → decisão de resgatar ===
+        let ctx = SwapContext {
+            role: Role::Taker,
+            my_token: [0x11; 20],
+            my_amount: 1000,
+            my_timelock: obs.timelock + 100,
+            my_recipient: sender.into_array(),
+            cp_token: [0u8; 20],
+            cp_amount: amount_u128,
+            me,
+            min_gap: 50,
+            hashlock: Some(hashlock),
+            secret: Some(preimage),
+            my_leg_locked: true,
+            counterparty_lock: Some(obs),
+            revealed_secret: None,
+            now: now_unix(),
+        };
+        assert_eq!(
+            next_action(&SwapState::MyLegLocked, &ctx),
+            NextAction::RedeemCounterpartyLeg { secret: preimage },
+            "a leitura real, verificada Safe, leva o taker a resgatar"
+        );
+
+        // === negativo: um contractId inexistente lê como exists=false ===
+        let absent = v.observe_lock(htlc_addr, [0xFFu8; 32]).await.unwrap();
+        assert!(!absent.exists, "trava inexistente → exists=false");
+        assert_eq!(
+            verify_counterparty_leg(&exp, &absent),
+            VerifyOutcome::Unsafe(UnsafeReason::LockNotFound)
+        );
     }
 }

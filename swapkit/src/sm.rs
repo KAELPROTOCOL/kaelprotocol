@@ -163,6 +163,7 @@ impl SwapContext {
             expected_recipient: self.me,
             my_timelock: self.my_timelock,
             min_gap: self.min_gap,
+            now: self.now, // gate de relógio absoluto (perna oposta não pode expirar já)
             role: self.role,
         }
     }
@@ -411,6 +412,27 @@ mod tests {
         assert!(
             !matches!(action, NextAction::RedeemCounterpartyLeg { .. }),
             "o segredo NUNCA pode vazar contra uma perna insegura"
+        );
+    }
+
+    // TESTE CRÍTICO 1b: o taker NÃO revela o segredo contra uma perna que está
+    // ESTRUTURALMENTE correta (mesmo hashlock, gap inter-pernas ok) mas que
+    // expira perto demais de AGORA. Sem o gate de relógio, a máquina mandaria
+    // resgatar (revelando o segredo) sem janela para a tx ser minerada — o
+    // segredo vazaria e a contraparte varreria a perna do taker.
+    #[test]
+    fn taker_never_reveals_secret_against_leg_expiring_now() {
+        let mut ctx = taker_ctx();
+        // perna do maker segura por GAP (1800 + 100 <= 2000)...
+        ctx.counterparty_lock = Some(maker_leg_safe());
+        // ...mas o relógio já está em 1750: 1800 < 1750 + 100 → sem janela.
+        ctx.now = 1750;
+
+        let action = next_action(&SwapState::MyLegLocked, &ctx);
+        assert_eq!(action, NextAction::Refund, "deve reembolsar, jamais resgatar");
+        assert!(
+            !matches!(action, NextAction::RedeemCounterpartyLeg { .. }),
+            "o segredo NUNCA pode vazar contra uma perna prestes a expirar"
         );
     }
 

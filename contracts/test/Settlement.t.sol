@@ -44,8 +44,8 @@ contract SettlementTest is Test {
     uint256 constant TOK_AMT = 5 ether;
 
     function setUp() public {
-        settlement = new Settlement();
         htlc = new HashedTimelock();
+        settlement = new Settlement(address(htlc)); // HTLC canônico fixado no deploy
         token = new MockERC20();
         maker = vm.addr(makerPk);
         alice = vm.addr(alicePk);
@@ -152,7 +152,7 @@ contract SettlementTest is Test {
         returns (bytes32 cid)
     {
         vm.prank(alice);
-        cid = settlement.settleLeg{value: ETH_AMT}(a, _sign(a, alicePk), recipient, hl, tl, address(htlc));
+        cid = settlement.settleLeg{value: ETH_AMT}(a, _sign(a, alicePk), recipient, hl, tl);
     }
 
     function _settleTokenLeg(OrderLib.Order memory b, address recipient, bytes32 hl, uint256 tl)
@@ -162,7 +162,7 @@ contract SettlementTest is Test {
         bytes memory sigB = _sign(b, bobPk);
         vm.startPrank(bob);
         token.approve(address(settlement), TOK_AMT);
-        cid = settlement.settleLeg(b, sigB, recipient, hl, tl, address(htlc));
+        cid = settlement.settleLeg(b, sigB, recipient, hl, tl);
         vm.stopPrank();
     }
 
@@ -211,7 +211,7 @@ contract SettlementTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(Settlement.WrongChain.selector);
-        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, block.timestamp + 2 hours, address(htlc));
+        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, block.timestamp + 2 hours);
 
         assertEq(alice.balance, before, "nada saiu de Alice");
     }
@@ -227,7 +227,7 @@ contract SettlementTest is Test {
         // mesmo com a ordem+assinatura válidas de Alice, o atacante não é o maker
         vm.prank(attacker);
         vm.expectRevert(Settlement.NotOrderMaker.selector);
-        settlement.settleLeg{value: ETH_AMT}(a, sigA, attacker, HL, block.timestamp + 2 hours, address(htlc));
+        settlement.settleLeg{value: ETH_AMT}(a, sigA, attacker, HL, block.timestamp + 2 hours);
 
         assertEq(alice.balance, aliceBefore, "nada de Alice se moveu");
         assertEq(address(htlc).balance, 0, "nada travado");
@@ -252,7 +252,7 @@ contract SettlementTest is Test {
         // atacante tenta liquidar a perna do Bob com recipient = atacante
         vm.prank(attacker);
         vm.expectRevert(Settlement.NotOrderMaker.selector);
-        settlement.settleLeg(b, sigB, attacker, attackerHL, block.timestamp + 2 hours, address(htlc));
+        settlement.settleLeg(b, sigB, attacker, attackerHL, block.timestamp + 2 hours);
 
         // a aprovação sozinha NÃO permitiu roubo: tokens do Bob intactos
         assertEq(token.balanceOf(bob), bobBefore, "tokens do Bob intactos");
@@ -271,7 +271,7 @@ contract SettlementTest is Test {
         bytes memory sigA = _sign(a, alicePk);
         vm.prank(alice);
         vm.expectRevert(Settlement.NonceAlreadyUsed.selector);
-        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, tlA, address(htlc));
+        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, tlA);
 
         assertEq(alice.balance, aliceAfterFirst, "nenhum ETH a mais saiu de Alice");
         assertEq(address(htlc).balance, ETH_AMT, "HTLC so tem a 1a trava");
@@ -286,7 +286,7 @@ contract SettlementTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(OrderLib.SignerNotMaker.selector);
-        settlement.settleLeg{value: ETH_AMT}(a, badSig, bob, HL, block.timestamp + 2 hours, address(htlc));
+        settlement.settleLeg{value: ETH_AMT}(a, badSig, bob, HL, block.timestamp + 2 hours);
 
         assertEq(alice.balance, before);
         assertEq(address(settlement).balance, 0);
@@ -301,7 +301,7 @@ contract SettlementTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(OrderLib.OrderExpired.selector);
-        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, block.timestamp + 2 hours, address(htlc));
+        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, block.timestamp + 2 hours);
 
         assertEq(alice.balance, before);
     }

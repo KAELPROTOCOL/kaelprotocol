@@ -22,3 +22,8 @@ alloy = { version = "1.0", features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Prova de integração REAL contra anvil: sobe nó, faz deploy do HTLC e cria uma
+# trava de verdade, lida via RpcVerifier. Reusa o binding do HTLC (sol!) e o
+# hashlock do maestro para não duplicar artefato/regra.
+maestro = { path = "../maestro" }
+alloy = { version = "1.0", features = ["node-bindings", "signer-local"] }
