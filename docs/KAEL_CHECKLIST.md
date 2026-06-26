@@ -1,6 +1,6 @@
 # Kael Checklist
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 ## Last Completed
 
@@ -17,21 +17,33 @@ Last updated: 2026-06-25
 - Development test runner added at `scripts/run_dev_swap_test.sh`.
 - Development test runbook added at `docs/DEV_TEST_RUNBOOK.md`.
 - Closed developer testnet preflight added at `scripts/run_closed_testnet_preflight.sh`.
-- Closed developer testnet direct HTLC swap runner added at `scripts/run_closed_testnet_swap.sh`.
+- Closed developer testnet swap runner added at `scripts/run_closed_testnet_swap.sh`.
 - Closed developer testnet runbook added at `docs/CLOSED_TESTNET_RUNBOOK.md`.
 - Closed developer testnet UX improved:
   - preflight lists all missing required variables at once;
   - `.env.closed-testnet.example` documents safe local defaults;
-  - `scripts/run_closed_testnet_local.sh` starts two local anvils, deploys HTLCs, runs preflight, runs swap, and cleans up.
+  - `scripts/run_closed_testnet_local.sh` starts two local anvils, deploys HTLCs and Settlements, runs preflight, runs swap, and cleans up.
+- Closed developer testnet runner now locks and refunds through `Settlement` while observing/redeeming the canonical HTLC.
+- Settlement mainnet-readiness coverage added for HTLC contractId binding of recipient/hashlock/timelock and rollback on invalid zero amount/hashlock/timelock legs.
+- ERC-20 hardening added for exact allowance in the executor plus EOA-token and insufficient-allowance rejection in contracts.
+- Mainnet-like private testnet runner added at `scripts/run_private_testnet_full.sh`, with native Settlement, ERC-20 Settlement, direct HTLC primitive coverage, bytecode/gas/balance/allowance checks, and expected operational failures.
+- Adversarial coverage added for direct HTLC terminal-state conflicts and private-testnet operational failures covering EOA HTLC, EOA Settlement, invalid ERC-20 token, missing send confirmation, and missing cross-chain gas for each signer.
+- Fuzz and property coverage added in `contracts/test/MainnetReadinessFuzz.t.sol` and `swapkit/tests/mainnet_readiness_properties.rs`.
+- Defensive hardening added to redact secrets from `NextAction` debug output and remove `Debug` from `SwapContext`.
+- Internal audit report, findings register, and risk register added in `docs/INTERNAL_AUDIT_REPORT.md`, `docs/FINDINGS_REGISTER.md`, and `docs/RISK_REGISTER.md`.
+- Professional audit readiness package added in `docs/AUDIT_PACKAGE.md`, with architecture, threat model, invariants, assumptions, runbooks, incident response, test matrix, known limitations, and mainnet gap documents.
 
 ## Current Milestone
 
-- Peça 5: concluded for local/anvil development scope.
-- Local e2e: concluded for direct HTLC native ETH scope.
+- Piece 5: concluded for local/anvil development scope.
+- Local direct HTLC e2e: concluded as primitive coverage.
 - Development runner: concluded.
 - Closed testnet preflight: concluded for configuration/environment validation.
-- Closed testnet direct HTLC swap runner: concluded for developer-only native ETH HTLC scope.
+- Closed testnet Settlement-mediated swap runner: concluded for developer-only native ETH HTLC scope.
 - Closed local automatic runner: available for two local Anvil chains.
+- Mainnet-like private testnet runner: available for local/private audit-gate validation; not mainnet and not real funds.
+- Internal audit package: available for professional audit handoff; not production approval.
+- Professional audit package: available for external auditor reproduction; not production approval.
 
 Expected local command:
 
@@ -42,7 +54,7 @@ Expected local command:
 Expected success marker:
 
 ```text
-Marco de desenvolvimento atingido: swap local rodando pela carteira.
+Development milestone reached: wallet-driven local swap through Settlement.
 ```
 
 Expected closed testnet preflight command:
@@ -81,6 +93,18 @@ Expected automatic local closed testnet marker:
 Closed developer testnet swap completed.
 ```
 
+Expected mainnet-like private testnet command:
+
+```bash
+./scripts/run_private_testnet_full.sh
+```
+
+Expected mainnet-like private testnet marker:
+
+```text
+PRIVATE TESTNET FULL PASS
+```
+
 ## Audit Findings
 
 - Critical: 0 open.
@@ -94,7 +118,7 @@ Closed developer testnet swap completed.
 - Low: 1 fixed.
   - `KAEL-L-001`: unused orderbook test helper removed.
 - Informational: 1 fixed.
-  - `KAEL-I-001`: Settlement intentionally out of first local executor e2e.
+  - `KAEL-I-001`: Settlement integrated into the closed-testnet runner; direct HTLC remains as primitive coverage.
 
 ## Next Exact Step
 
@@ -108,6 +132,12 @@ For the closed developer testnet local path, run:
 
 ```bash
 ./scripts/run_closed_testnet_local.sh
+```
+
+For the broader local/private audit gate, run:
+
+```bash
+./scripts/run_private_testnet_full.sh
 ```
 
 For broader validation, run:
@@ -127,6 +157,6 @@ cd contracts && forge test
 - Multi-RPC quorum or trustless light-client verification.
 - Persistent crash/restart recovery beyond the simple local executor state.
 - Explicit non-EVM recipient handling before Bitcoin support.
-- Productized closed-testnet flow using p2p/orderbook/Settlement instead of the direct HTLC developer runner.
+- Productized p2p/orderbook flow around the Settlement-mediated closed-testnet runner.
 
 Rule: no mainnet, no real funds, and no weakening of the testnet/local allowlist.

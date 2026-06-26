@@ -1,5 +1,3 @@
-//! Representação de fio (JSON) das ordens: endereços em hex `0x…`, montantes
-//! como string decimal (u128 não cabe com segurança em number JSON), assinatura
 //! em hex. Converte de/para o [`Order`] interno.
 
 use crate::order::{Address, Order};
@@ -21,7 +19,6 @@ pub struct OrderDto {
 #[derive(Debug, Deserialize)]
 pub struct SubmitRequest {
     pub order: OrderDto,
-    /// assinatura `r‖s‖v` (65 bytes) em hex `0x…`.
     pub signature: String,
 }
 

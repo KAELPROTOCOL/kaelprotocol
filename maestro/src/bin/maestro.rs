@@ -1,10 +1,6 @@
-//! Binário do Maestro: observa duas chains EVM e correlaciona swaps por
-//! hashlock. Configurado por variáveis de ambiente:
 //!   KAEL_RPC_A, KAEL_CHAIN_A, KAEL_HTLC_A
 //!   KAEL_RPC_B, KAEL_CHAIN_B, KAEL_HTLC_B
-//!   KAEL_POLL_SECS (padrão 5)
 //!
-//! SEM chaves, SEM custódia. Só observa, correlaciona e alerta timeouts.
 
 use alloy::primitives::Address;
 use alloy::providers::{Provider, ProviderBuilder};
@@ -13,7 +9,7 @@ use maestro::SwapTracker;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn env(key: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| panic!("variável de ambiente {key} ausente"))
+    std::env::var(key).unwrap_or_else(|_| panic!("environment variable {key} is missing"))
 }
 
 fn now_unix() -> u64 {
@@ -76,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::warn!(
                 hashlock = %format!("0x{}", hex::encode(h)),
                 chain,
-                "WATCHDOG: perna expirada sem resgate"
+                "WATCHDOG: leg expired without redeem"
             );
         }
 

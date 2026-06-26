@@ -1,26 +1,27 @@
-//! Máquina de estados do protocolo interativo de swap (pura).
+//! Pure state machine for the interactive swap protocol.
 //!
-//! Ela NÃO executa ações — DECIDE a próxima ação ([`NextAction`]) dado o papel,
-//! o estado e as observações das chains. Uma camada posterior executa. Tudo do
-//! mundo entra por parâmetro (observações, tempo atual). Sem rede, sem chaves.
+//! It does not execute actions. It decides the next action ([`NextAction`])
+//! from the role, state, and chain observations. A later layer executes the
+//! action. All external data is supplied as parameters: observations and
+//! current time. No network access and no keys.
 //!
-//! PAPÉIS (fixos):
-//! - `Taker` = detentor do segredo; trava PRIMEIRO, timelock LONGO.
-//! - `Maker` = respondente; trava DEPOIS (mesmo hashlock que leu da perna do
-//!   taker), timelock CURTO.
+//! Fixed roles:
+//! - `Taker`: owns the secret, locks first, uses the long timelock.
+//! - `Maker`: responds second, locks with the same hashlock observed on the
+//!   taker leg, uses the short timelock.
 //!
-//! PRINCÍPIO DE SEGURANÇA INVIOLÁVEL: a máquina NUNCA emite `LockMyLeg` nem
-//! `RedeemCounterpartyLeg` se [`verify_counterparty_leg`] não devolver `Safe`.
-//! - O Maker só trava DEPOIS de verificar a perna do taker como Safe (mesmo
-//!   hashlock, gap seguro). Se Unsafe e ele ainda não travou → `Abort`.
-//! - O Taker só revela o segredo (resgatando a perna do maker) DEPOIS de
-//!   verificar essa perna como Safe. Se Unsafe e ele já travou → `Refund`
-//!   (após expiração) — o segredo NUNCA vaza contra uma perna insegura.
+//! Inviolable safety principle: the machine never emits `LockMyLeg` or
+//! `RedeemCounterpartyLeg` unless [`verify_counterparty_leg`] returns `Safe`.
+//! - The maker locks only after verifying the taker leg as Safe: same hashlock
+//!   and safe timelock gap. If Unsafe before locking, return `Abort`.
+//! - The taker reveals the secret by redeeming the maker leg only after that
+//!   leg verifies as Safe. If Unsafe after locking, return `Refund` after
+//!   expiry. The secret must never leak against an unsafe leg.
 //!
-//! DECISÃO DE MODELAGEM: não há estado "Verificado" persistido. A verificação é
-//! re-derivada das observações a CADA `next_action`. Um flag "já verifiquei"
-//! gravado no estado poderia ser burlado se as condições da outra chain mudassem
-//! (reorg, substituição). Verificar sempre, a partir do observado, é mais seguro.
+//! Modeling decision: there is no persisted "verified" state. Verification is
+//! re-derived from observations on every `next_action`. A stored "already
+//! verified" flag could become stale if the other chain changes due to a reorg
+//! or replacement. Re-verifying from observations is safer.
 
 use crate::verify::{
     verify_counterparty_leg, Address, LegExpectation, ObservedLock, Role, UnsafeReason,
@@ -28,136 +29,170 @@ use crate::verify::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Os estados pelos quais um swap passa, do ponto de vista DESTA parte.
+/// States a swap can pass through from this party's point of view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SwapState {
-    /// início.
+    /// Initial state.
     Start,
-    /// (taker) segredo + hashlock prontos; prestes a travar a própria perna.
+    /// Taker has generated the secret and hashlock and is ready to lock.
     SecretGenerated,
-    /// (taker) própria perna travada; vai observar+verificar a perna do maker e resgatar.
+    /// Own leg is locked; observe and verify the maker leg before redeeming.
     MyLegLocked,
-    /// (maker) própria perna travada; aguardando o taker revelar o segredo.
+    /// Maker has locked and is waiting for the taker to reveal the secret.
     WaitingForSecret,
-    /// (maker) segredo aprendido; prestes a resgatar a perna do taker.
+    /// Maker learned the secret and is ready to redeem the taker leg.
     SecretLearned,
-    /// (ambos) resgatei a perna oposta (taker revela; maker reivindica) — sucesso.
+    /// This party redeemed the opposite leg successfully.
     CounterpartyRedeemed,
-    /// concluído.
+    /// Completed.
     Done,
-    /// decidi reembolsar a minha perna (após expiração).
+    /// Decided to refund this party's own leg after expiry.
     Refunding,
-    /// reembolsado.
+    /// Refunded.
     Refunded,
-    /// abortado, com a razão.
+    /// Aborted with the reason.
     Aborted(AbortReason),
 }
 
-/// Razão de um aborto.
+/// Reason for aborting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AbortReason {
-    /// a perna oposta foi considerada insegura pelo verificador.
+    /// The opposite leg was considered unsafe by the verifier.
     UnsafeCounterparty(UnsafeReason),
-    /// faltava o segredo quando ele era necessário.
+    /// The secret was missing when it was required.
     MissingSecret,
-    /// faltava o hashlock quando ele era necessário.
+    /// The hashlock was missing when it was required.
     MissingHashlock,
-    /// uma verificação falhou (caminho de evento, sem a razão detalhada).
+    /// Verification failed on the event path without a detailed reason.
     VerificationFailed,
-    /// o estado não faz sentido para este papel.
+    /// The current state is invalid for this role.
     InvalidState,
-    /// uma transição inválida foi solicitada.
+    /// An invalid state transition was requested.
     InvalidTransition,
 }
 
-/// O que a máquina MANDA fazer a seguir. A camada de execução realiza.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// The next action requested by the state machine. The execution layer performs it.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NextAction {
-    /// (taker) gere um segredo e seu hashlock H = SHA256(segredo).
+    /// Taker should generate a secret and H = SHA256(secret).
     GenerateSecret,
-    /// trave a minha perna no HTLC desta chain.
+    /// Lock this party's leg in this chain's HTLC.
     LockMyLeg {
-        recipient: Address, // quem pode resgatar a MINHA perna = a contraparte
+        recipient: Address, // who can redeem this party's leg: the counterparty
         token: Address,
         amount: u128,
         hashlock: [u8; 32],
         timelock: u64,
     },
-    /// reservada: a verificação é feita DENTRO de `next_action` (gate); exposta
-    /// para executores que queiram dirigir a verificação explicitamente.
+    /// Reserved: verification is gated inside `next_action`; exposed for
+    /// executors that want to drive verification explicitly.
     VerifyCounterpartyLeg,
-    /// resgate a perna oposta revelando/usando o segredo.
+    /// Redeem the opposite leg by revealing or using the secret.
     RedeemCounterpartyLeg { secret: [u8; 32] },
-    /// a trava oposta ainda não apareceu — continue observando.
+    /// The opposite lock has not appeared yet; keep observing.
     WaitForCounterpartyLock,
-    /// minha perna travada; aguarde a contraparte revelar o segredo.
+    /// Own leg is locked; wait for the counterparty to reveal the secret.
     WaitForSecretReveal,
-    /// reembolse a minha perna (após expiração do timelock).
+    /// Refund this party's own leg after timelock expiry.
     Refund,
-    /// nada mais a fazer.
+    /// Nothing else to do.
     Done,
-    /// pare com segurança; não prossiga.
+    /// Stop safely and do not proceed.
     Abort { reason: AbortReason },
 }
 
-/// Eventos do mundo que fazem o estado avançar.
+impl std::fmt::Debug for NextAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NextAction::GenerateSecret => write!(f, "GenerateSecret"),
+            NextAction::LockMyLeg {
+                recipient,
+                token,
+                amount,
+                hashlock,
+                timelock,
+            } => f
+                .debug_struct("LockMyLeg")
+                .field("recipient", recipient)
+                .field("token", token)
+                .field("amount", amount)
+                .field("hashlock", hashlock)
+                .field("timelock", timelock)
+                .finish(),
+            NextAction::VerifyCounterpartyLeg => write!(f, "VerifyCounterpartyLeg"),
+            NextAction::RedeemCounterpartyLeg { .. } => f
+                .debug_struct("RedeemCounterpartyLeg")
+                .field("secret", &"<redacted>")
+                .finish(),
+            NextAction::WaitForCounterpartyLock => write!(f, "WaitForCounterpartyLock"),
+            NextAction::WaitForSecretReveal => write!(f, "WaitForSecretReveal"),
+            NextAction::Refund => write!(f, "Refund"),
+            NextAction::Done => write!(f, "Done"),
+            NextAction::Abort { reason } => {
+                f.debug_struct("Abort").field("reason", reason).finish()
+            }
+        }
+    }
+}
+
+/// Events from the outside world that advance state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwapEvent {
-    /// (taker) segredo + hashlock gerados.
+    /// Taker generated the secret and hashlock.
     SecretGenerated,
-    /// a minha trava foi confirmada on-chain.
+    /// This party's lock was confirmed on-chain.
     MyLegConfirmed,
-    /// a trava da contraparte foi observada.
+    /// The counterparty lock was observed.
     CounterpartyLockObserved,
-    /// a verificação da perna oposta falhou (insegura).
+    /// Verification of the opposite leg failed.
     VerificationFailed,
-    /// o segredo foi revelado on-chain (por um resgate).
+    /// The secret was revealed on-chain by a redeem.
     SecretObserved,
-    /// o meu timelock expirou.
+    /// This party's timelock expired.
     TimelockExpired,
-    /// o meu resgate da perna oposta foi confirmado.
+    /// This party's redeem of the opposite leg was confirmed.
     RedeemConfirmed,
-    /// o meu reembolso foi confirmado.
+    /// This party's refund was confirmed.
     RefundConfirmed,
 }
 
-/// Tudo que a máquina precisa saber do mundo (observações + parâmetros).
-#[derive(Clone, Debug)]
+/// Everything the state machine needs to know from the world.
+#[derive(Clone)]
 pub struct SwapContext {
     pub role: Role,
 
-    // --- a MINHA perna (o que eu vendo/travo) ---
+    // --- my leg: what I sell/lock ---
     pub my_token: Address,
     pub my_amount: u128,
     pub my_timelock: u64,
-    /// quem pode resgatar a MINHA perna = a contraparte.
+    /// Who can redeem my leg: the counterparty.
     pub my_recipient: Address,
 
-    // --- a perna OPOSTA que eu espero/observo (o que eu compro) ---
+    // --- opposite leg: what I expect/observe ---
     pub cp_token: Address,
     pub cp_amount: u128,
-    /// o MEU endereço — quem deve poder resgatar a perna oposta.
+    /// My address: who must be able to redeem the opposite leg.
     pub me: Address,
     pub min_gap: u64,
 
-    /// hashlock: taker = H(segredo) após gerar; maker = H acordado no handshake.
+    /// Hashlock: taker uses H(secret) after generation; maker uses the agreed H.
     pub hashlock: Option<[u8; 32]>,
-    /// o segredo (só o taker tem desde o início).
+    /// Secret preimage. Sensitive: this type intentionally does not implement Debug.
     pub secret: Option<[u8; 32]>,
 
-    // --- observações ---
-    /// a minha trava já foi confirmada on-chain?
+    // --- observations ---
+    /// Whether my lock has been confirmed on-chain.
     pub my_leg_locked: bool,
-    /// a perna oposta como observada (None = ainda não vista).
+    /// Observed opposite leg, or None when it has not been seen yet.
     pub counterparty_lock: Option<ObservedLock>,
-    /// segredo revelado por um resgate (o maker aprende por aqui).
+    /// Secret revealed by an on-chain redeem.
     pub revealed_secret: Option<[u8; 32]>,
-    /// tempo atual (parâmetro — a máquina não lê relógio).
+    /// Current time supplied by the caller. The state machine does not read a clock.
     pub now: u64,
 }
 
 impl SwapContext {
-    /// Expectativa para verificar a perna OPOSTA, conforme o meu papel.
+    /// Expectations for verifying the opposite leg according to this role.
     fn expectation(&self) -> LegExpectation {
         LegExpectation {
             expected_hashlock: self.hashlock.unwrap_or([0u8; 32]),
@@ -166,7 +201,7 @@ impl SwapContext {
             expected_recipient: self.me,
             my_timelock: self.my_timelock,
             min_gap: self.min_gap,
-            now: self.now, // gate de relógio absoluto (perna oposta não pode expirar já)
+            now: self.now, // absolute clock gate: opposite leg must not expire now
             role: self.role,
         }
     }
@@ -182,14 +217,14 @@ impl SwapContext {
     }
 }
 
-/// Decide a próxima ação, dado o estado e o contexto (puro).
+/// Decide the next action from state and context without side effects.
 ///
-/// Os pontos de gate (`LockMyLeg` do maker, `RedeemCounterpartyLeg` do taker)
-/// chamam [`verify_counterparty_leg`] internamente e SÓ liberam a ação se o
-/// resultado for `Safe`. Caso contrário: `Abort` (se nada travado) ou `Refund`
-/// (se já travei).
+/// Gate points (`LockMyLeg` for the maker, `RedeemCounterpartyLeg` for the
+/// taker) call [`verify_counterparty_leg`] internally and only release the
+/// action when the result is `Safe`. Otherwise they return `Abort` when
+/// nothing is locked or `Refund` when this party has already locked.
 pub fn next_action(state: &SwapState, ctx: &SwapContext) -> NextAction {
-    // estados terminais / independentes de papel
+    // Terminal states and role-independent states.
     match state {
         SwapState::Aborted(r) => return NextAction::Abort { reason: *r },
         SwapState::Done | SwapState::Refunded => return NextAction::Done,
@@ -213,15 +248,15 @@ fn taker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
             },
         },
         SwapState::MyLegLocked => match ctx.counterparty_lock {
-            // a perna do maker ainda não apareceu
+            // The maker leg has not appeared yet.
             None => {
                 if ctx.now >= ctx.my_timelock {
-                    NextAction::Refund // expirei esperando a contraparte
+                    NextAction::Refund // expired while waiting for the counterparty
                 } else {
                     NextAction::WaitForCounterpartyLock
                 }
             }
-            // observei a perna do maker: VERIFICO antes de revelar o segredo
+            // Observed maker leg: verify before revealing the secret.
             Some(obs) => match verify_counterparty_leg(&ctx.expectation(), &obs) {
                 VerifyOutcome::Safe => match ctx.secret {
                     Some(s) => NextAction::RedeemCounterpartyLeg { secret: s },
@@ -229,11 +264,11 @@ fn taker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
                         reason: AbortReason::MissingSecret,
                     },
                 },
-                // INSEGURA + já travei → reembolso. O SEGREDO NUNCA VAZA.
+                // Unsafe after locking: refund. The secret must never leak.
                 VerifyOutcome::Unsafe(_) => NextAction::Refund,
             },
         },
-        // estados de maker não fazem sentido para o taker
+        // Maker states are invalid for the taker.
         _ => NextAction::Abort {
             reason: AbortReason::InvalidState,
         },
@@ -243,9 +278,9 @@ fn taker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
 fn maker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
     match state {
         SwapState::Start => match ctx.counterparty_lock {
-            // a perna do taker ainda não apareceu
+            // The taker leg has not appeared yet.
             None => NextAction::WaitForCounterpartyLock,
-            // observei a perna do taker: VERIFICO antes de travar a minha
+            // Observed taker leg: verify before locking this party's leg.
             Some(obs) => match verify_counterparty_leg(&ctx.expectation(), &obs) {
                 VerifyOutcome::Safe => match ctx.hashlock {
                     Some(h) => ctx.lock_my_leg(h),
@@ -253,7 +288,7 @@ fn maker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
                         reason: AbortReason::MissingHashlock,
                     },
                 },
-                // INSEGURA + ainda NÃO travei → aborto. NUNCA travo contra perna insegura.
+                // Unsafe before locking: abort. Never lock against an unsafe leg.
                 VerifyOutcome::Unsafe(r) => NextAction::Abort {
                     reason: AbortReason::UnsafeCounterparty(r),
                 },
@@ -263,7 +298,7 @@ fn maker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
             Some(s) => NextAction::RedeemCounterpartyLeg { secret: s },
             None => {
                 if ctx.now >= ctx.my_timelock {
-                    NextAction::Refund // o taker nunca revelou; minha perna expirou
+                    NextAction::Refund // taker never revealed; this party's leg expired
                 } else {
                     NextAction::WaitForSecretReveal
                 }
@@ -275,20 +310,20 @@ fn maker_next(state: &SwapState, ctx: &SwapContext) -> NextAction {
                 reason: AbortReason::MissingSecret,
             },
         },
-        // estados de taker não fazem sentido para o maker
+        // Taker states are invalid for the maker.
         _ => NextAction::Abort {
             reason: AbortReason::InvalidState,
         },
     }
 }
 
-/// Transição de estado a partir de um evento do mundo. Transições inválidas →
-/// `Aborted(InvalidTransition)`, NUNCA panic.
+/// Advance state from an external event. Invalid transitions return
+/// `Aborted(InvalidTransition)` and never panic.
 pub fn advance(state: SwapState, event: SwapEvent) -> SwapState {
     use SwapEvent as E;
     use SwapState::*;
 
-    // terminais absorvem qualquer evento.
+    // Terminal states absorb every event.
     match state {
         Done | Refunded => return state,
         Aborted(r) => return Aborted(r),
@@ -300,24 +335,24 @@ pub fn advance(state: SwapState, event: SwapEvent) -> SwapState {
         (Start, E::SecretGenerated) => SecretGenerated,
         (SecretGenerated, E::MyLegConfirmed) => MyLegLocked,
         (SecretGenerated, E::TimelockExpired) => Refunding,
-        (MyLegLocked, E::CounterpartyLockObserved) => MyLegLocked, // obs disponível; next_action re-decide
+        (MyLegLocked, E::CounterpartyLockObserved) => MyLegLocked, // observation available; next_action re-decides
         (MyLegLocked, E::RedeemConfirmed) => CounterpartyRedeemed,
         (MyLegLocked, E::VerificationFailed) => Refunding,
         (MyLegLocked, E::TimelockExpired) => Refunding,
 
         // maker
-        (Start, E::CounterpartyLockObserved) => Start, // obs disponível; next_action re-decide
+        (Start, E::CounterpartyLockObserved) => Start, // observation available; next_action re-decides
         (Start, E::MyLegConfirmed) => WaitingForSecret,
         (Start, E::VerificationFailed) => Aborted(AbortReason::VerificationFailed),
         (WaitingForSecret, E::SecretObserved) => SecretLearned,
         (WaitingForSecret, E::TimelockExpired) => Refunding,
         (SecretLearned, E::RedeemConfirmed) => CounterpartyRedeemed,
 
-        // ambos
+        // both
         (CounterpartyRedeemed, _) => Done,
         (Refunding, E::RefundConfirmed) => Refunded,
 
-        // qualquer outra combinação é inválida — erro explícito, sem panic.
+        // Every other combination is invalid: explicit error, no panic.
         _ => Aborted(AbortReason::InvalidTransition),
     }
 }
@@ -334,11 +369,11 @@ mod tests {
     }
 
     const SECRET: [u8; 32] = [0x5e; 32];
-    const HASH: u8 = 0xAB; // "H" acordado (faz de conta SHA256(SECRET))
+    const HASH: u8 = 0xAB; // agreed "H" in place of SHA256(SECRET)
     const TAKER_ADDR: u8 = 0x7A;
     const MAKER_ADDR: u8 = 0x3A;
-    const TOK_A: u8 = 0x11; // o que o taker vende (= maker compra)
-    const TOK_B: u8 = 0x22; // o que o maker vende (= taker compra)
+    const TOK_A: u8 = 0x11; // what the taker sells and the maker buys
+    const TOK_B: u8 = 0x22; // what the maker sells and the taker buys
 
     // ---------------- TAKER ----------------
 
@@ -347,11 +382,11 @@ mod tests {
             role: Role::Taker,
             my_token: a(TOK_A),
             my_amount: 1000,
-            my_timelock: 2000,           // LONGO
-            my_recipient: a(MAKER_ADDR), // minha perna paga o maker
+            my_timelock: 2000,           // long
+            my_recipient: a(MAKER_ADDR), // this party's leg pays the maker
             cp_token: a(TOK_B),
             cp_amount: 500,
-            me: a(TAKER_ADDR), // a perna do maker me paga
+            me: a(TAKER_ADDR), // maker leg pays this party
             min_gap: 100,
             hashlock: Some(h(HASH)),
             secret: Some(SECRET),
@@ -362,13 +397,13 @@ mod tests {
         }
     }
 
-    // perna do MAKER, observada pelo taker (segura: timelock CURTO, 1800+100<=2000)
+    // Maker leg observed by the taker. Safe: short timelock, 1800 + 100 <= 2000.
     fn maker_leg_safe() -> ObservedLock {
         ObservedLock {
             hashlock: h(HASH),
             token: a(TOK_B),
             amount: 500,
-            recipient: a(TAKER_ADDR), // me paga
+            recipient: a(TAKER_ADDR), // pays this party
             timelock: 1800,
             sender: a(MAKER_ADDR),
             exists: true,
@@ -380,25 +415,25 @@ mod tests {
         let mut ctx = taker_ctx();
         let mut actions = Vec::new();
 
-        // Start → gera segredo
+        // Start: generate secret.
         let mut st = SwapState::Start;
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::SecretGenerated);
 
-        // SecretGenerated → trava a própria perna
+        // SecretGenerated: lock own leg.
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::MyLegConfirmed);
 
-        // MyLegLocked, sem observar o maker → espera
+        // MyLegLocked without observing the maker: wait.
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::CounterpartyLockObserved);
 
-        // MyLegLocked, observou o maker (Safe) → resgata revelando o segredo
+        // MyLegLocked after observing a Safe maker leg: redeem by revealing the secret.
         ctx.counterparty_lock = Some(maker_leg_safe());
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::RedeemConfirmed);
 
-        // CounterpartyRedeemed → Done
+        // CounterpartyRedeemed: Done.
         actions.push(next_action(&st, &ctx));
 
         assert_eq!(
@@ -414,46 +449,41 @@ mod tests {
         assert_eq!(st, SwapState::CounterpartyRedeemed);
     }
 
-    // TESTE CRÍTICO 1: o taker NÃO revela o segredo contra uma perna insegura.
+    // Critical test 1: the taker does not reveal the secret against an unsafe leg.
     #[test]
     fn taker_never_reveals_secret_against_unsafe_leg() {
         let mut ctx = taker_ctx();
-        // a perna do maker tem hashlock ERRADO
+        // Maker leg has the wrong hashlock.
         let mut bad = maker_leg_safe();
         bad.hashlock = h(0x01);
         ctx.counterparty_lock = Some(bad);
 
         let action = next_action(&SwapState::MyLegLocked, &ctx);
-        // a máquina manda REEMBOLSAR, jamais resgatar
+        // The machine refunds and never redeems.
         assert_eq!(action, NextAction::Refund);
         assert!(
             !matches!(action, NextAction::RedeemCounterpartyLeg { .. }),
-            "o segredo NUNCA pode vazar contra uma perna insegura"
+            "the secret must never leak against an unsafe leg"
         );
     }
 
-    // TESTE CRÍTICO 1b: o taker NÃO revela o segredo contra uma perna que está
-    // ESTRUTURALMENTE correta (mesmo hashlock, gap inter-pernas ok) mas que
-    // expira perto demais de AGORA. Sem o gate de relógio, a máquina mandaria
-    // resgatar (revelando o segredo) sem janela para a tx ser minerada — o
-    // segredo vazaria e a contraparte varreria a perna do taker.
+    // Critical test 1b: the taker does not reveal the secret against a leg that
+    // is structurally correct but expires too close to now. Without the clock
+    // gate, the machine would redeem and reveal the secret without a safe
+    // mining window.
     #[test]
     fn taker_never_reveals_secret_against_leg_expiring_now() {
         let mut ctx = taker_ctx();
-        // perna do maker segura por GAP (1800 + 100 <= 2000)...
+        // Maker leg is safe by inter-leg gap: 1800 + 100 <= 2000.
         ctx.counterparty_lock = Some(maker_leg_safe());
-        // ...mas o relógio já está em 1750: 1800 < 1750 + 100 → sem janela.
+        // But the clock is already 1750: 1800 < 1750 + 100, so no safe window remains.
         ctx.now = 1750;
 
         let action = next_action(&SwapState::MyLegLocked, &ctx);
-        assert_eq!(
-            action,
-            NextAction::Refund,
-            "deve reembolsar, jamais resgatar"
-        );
+        assert_eq!(action, NextAction::Refund, "must refund and never redeem");
         assert!(
             !matches!(action, NextAction::RedeemCounterpartyLeg { .. }),
-            "o segredo NUNCA pode vazar contra uma perna prestes a expirar"
+            "the secret must never leak against a leg about to expire"
         );
     }
 
@@ -464,13 +494,13 @@ mod tests {
             role: Role::Maker,
             my_token: a(TOK_B),
             my_amount: 500,
-            my_timelock: 1000,           // CURTO
-            my_recipient: a(TAKER_ADDR), // minha perna paga o taker
+            my_timelock: 1000,           // short
+            my_recipient: a(TAKER_ADDR), // this party's leg pays the taker
             cp_token: a(TOK_A),
             cp_amount: 1000,
-            me: a(MAKER_ADDR), // a perna do taker me paga
+            me: a(MAKER_ADDR), // taker leg pays this party
             min_gap: 100,
-            hashlock: Some(h(HASH)), // H acordado no handshake
+            hashlock: Some(h(HASH)), // H agreed during the handshake
             secret: None,
             my_leg_locked: false,
             counterparty_lock: None,
@@ -479,13 +509,13 @@ mod tests {
         }
     }
 
-    // perna do TAKER, observada pelo maker (segura: timelock LONGO >= 1000+100)
+    // Taker leg observed by the maker. Safe: long timelock >= 1000 + 100.
     fn taker_leg_safe() -> ObservedLock {
         ObservedLock {
             hashlock: h(HASH),
             token: a(TOK_A),
             amount: 1000,
-            recipient: a(MAKER_ADDR), // me paga
+            recipient: a(MAKER_ADDR), // pays this party
             timelock: 1200,
             sender: a(TAKER_ADDR),
             exists: true,
@@ -497,26 +527,26 @@ mod tests {
         let mut ctx = maker_ctx();
         let mut actions = Vec::new();
 
-        // Start, sem observar o taker → espera
+        // Start without observing the taker: wait.
         let mut st = SwapState::Start;
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::CounterpartyLockObserved);
 
-        // Start, observou o taker (Safe) → trava a própria perna (mesmo hashlock)
+        // Start after observing a Safe taker leg: lock own leg with the same hashlock.
         ctx.counterparty_lock = Some(taker_leg_safe());
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::MyLegConfirmed);
 
-        // WaitingForSecret, sem segredo → espera o segredo
+        // WaitingForSecret without a secret: wait for the secret.
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::SecretObserved);
 
-        // SecretLearned → resgata a perna do taker com o segredo aprendido
+        // SecretLearned: redeem the taker leg with the learned secret.
         ctx.revealed_secret = Some(SECRET);
         actions.push(next_action(&st, &ctx));
         st = advance(st, SwapEvent::RedeemConfirmed);
 
-        // CounterpartyRedeemed → Done
+        // CounterpartyRedeemed: Done.
         actions.push(next_action(&st, &ctx));
 
         assert_eq!(
@@ -532,11 +562,11 @@ mod tests {
         assert_eq!(st, SwapState::CounterpartyRedeemed);
     }
 
-    // TESTE CRÍTICO 2: o maker NÃO trava contra uma perna com gap inseguro.
+    // Critical test 2: the maker does not lock against a leg with an unsafe gap.
     #[test]
     fn maker_never_locks_against_unsafe_gap() {
         let mut ctx = maker_ctx();
-        // perna do taker com timelock só um pouco maior (gap < min_gap)
+        // Taker leg with a timelock only slightly larger than maker leg.
         let mut bad = taker_leg_safe();
         bad.timelock = 1050; // 1050 < my(1000) + gap(100)
         ctx.counterparty_lock = Some(bad);
@@ -550,16 +580,16 @@ mod tests {
         );
         assert!(
             !matches!(action, NextAction::LockMyLeg { .. }),
-            "o maker NUNCA trava contra uma perna insegura"
+            "the maker must never lock against an unsafe leg"
         );
     }
 
-    // o maker também não trava se o hashlock do taker difere do H acordado.
+    // The maker also does not lock if the taker hashlock differs from agreed H.
     #[test]
     fn maker_never_locks_against_hashlock_mismatch() {
         let mut ctx = maker_ctx();
         let mut bad = taker_leg_safe();
-        bad.hashlock = h(0x99); // != H acordado
+        bad.hashlock = h(0x99); // differs from agreed H
         ctx.counterparty_lock = Some(bad);
 
         let action = next_action(&SwapState::Start, &ctx);
@@ -572,13 +602,13 @@ mod tests {
         assert!(!matches!(action, NextAction::LockMyLeg { .. }));
     }
 
-    // ---------------- caminhos de reembolso ----------------
+    // ---------------- refund paths ----------------
 
     #[test]
     fn taker_refunds_when_counterparty_never_locks() {
         let mut ctx = taker_ctx();
         ctx.counterparty_lock = None;
-        ctx.now = ctx.my_timelock + 1; // expirou esperando
+        ctx.now = ctx.my_timelock + 1; // expired while waiting
 
         let st = SwapState::MyLegLocked;
         assert_eq!(next_action(&st, &ctx), NextAction::Refund);
@@ -596,7 +626,7 @@ mod tests {
     fn maker_refunds_when_secret_never_revealed() {
         let mut ctx = maker_ctx();
         ctx.revealed_secret = None;
-        ctx.now = ctx.my_timelock + 1; // expirou esperando o segredo
+        ctx.now = ctx.my_timelock + 1; // expired while waiting for the secret
 
         let st = SwapState::WaitingForSecret;
         assert_eq!(next_action(&st, &ctx), NextAction::Refund);
@@ -608,14 +638,14 @@ mod tests {
         assert_eq!(st, SwapState::Refunded);
     }
 
-    // ---------------- transição inválida ----------------
+    // ---------------- invalid transition ----------------
 
     #[test]
     fn invalid_transition_goes_to_aborted_no_panic() {
-        // SecretObserved não faz sentido em SecretGenerated
+        // SecretObserved does not make sense in SecretGenerated.
         let st = advance(SwapState::SecretGenerated, SwapEvent::SecretObserved);
         assert_eq!(st, SwapState::Aborted(AbortReason::InvalidTransition));
-        // e o estado abortado é absorvente
+        // Aborted state is absorbing.
         assert_eq!(
             advance(st, SwapEvent::MyLegConfirmed),
             SwapState::Aborted(AbortReason::InvalidTransition)
@@ -634,11 +664,11 @@ mod tests {
         );
     }
 
-    // papel errado para o estado → InvalidState (sem panic)
+    // Wrong role for the state returns InvalidState without panicking.
     #[test]
     fn wrong_role_for_state_is_invalid_state() {
-        let ctx = taker_ctx(); // taker
-                               // WaitingForSecret é estado de maker
+        let ctx = taker_ctx();
+        // WaitingForSecret is a maker state.
         assert_eq!(
             next_action(&SwapState::WaitingForSecret, &ctx),
             NextAction::Abort {

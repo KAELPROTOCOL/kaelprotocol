@@ -1,14 +1,9 @@
-//! Teste de integração da Parte 5: sobe o servidor real, submete ordens
-//! assinadas via HTTP, e consulta os matches. Prova a verificação na borda e a
 //! consulta de pares de ponta a ponta.
 
 use orderbook::eip712::sign;
 use orderbook::order::Order;
 use serde_json::json;
 
-// Reusa o assinador e os tipos do lib. Aqui falamos só JSON, como um cliente real.
-
-/// Chave privada de teste e seu endereço (derivado pelo próprio assinador).
 const PK_A: [u8; 32] = [0x11; 32];
 const PK_B: [u8; 32] = [0x22; 32];
 
@@ -68,7 +63,6 @@ async fn spawn_server() -> String {
     // Porta 0 = SO escolhe uma livre; descobrimos qual e devolvemos a base URL.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    // Usa o router DE PRODUÇÃO (orderbook::server) — o teste exercita o app real.
     let app = orderbook::server::build_router(orderbook::server::AppState::new());
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -110,7 +104,6 @@ async fn submit_verifies_and_matches_are_reported() {
     let sig_a = format!("0x{}", hex::encode(sign(&a, &PK_A)));
     let sig_b = format!("0x{}", hex::encode(sign(&b, &PK_B)));
 
-    // 1) ordem válida entra
     let r = client
         .post(
             &format!("{base}/orders"),
@@ -119,20 +112,14 @@ async fn submit_verifies_and_matches_are_reported() {
         .await;
     assert_eq!(r.0, 200, "A deveria ser aceita: {}", r.1);
 
-    // 2) assinatura inválida (trocada) é rejeitada na borda
     let bad = client
         .post(
             &format!("{base}/orders"),
             &json!({"order": order_json(&b), "signature": sig_a}),
         )
         .await;
-    assert_eq!(
-        bad.0, 422,
-        "assinatura errada deveria ser rejeitada: {}",
-        bad.1
-    );
+    assert_eq!(bad.0, 422, "wrong signature should be rejected: {}", bad.1);
 
-    // 3) ordem espelhada válida entra
     let r = client
         .post(
             &format!("{base}/orders"),
@@ -141,7 +128,6 @@ async fn submit_verifies_and_matches_are_reported() {
         .await;
     assert_eq!(r.0, 200, "B deveria ser aceita: {}", r.1);
 
-    // 4) a consulta informa o par compatível para o maker A
     let m = client
         .get(&format!("{base}/matches?maker=0x{}", hex::encode(maker_a)))
         .await;
@@ -155,7 +141,6 @@ async fn submit_verifies_and_matches_are_reported() {
     );
 }
 
-// Cliente HTTP mínimo sobre TcpStream (sem dep extra de cliente).
 struct SimpleClient;
 impl SimpleClient {
     async fn post(&self, url: &str, body: &serde_json::Value) -> (u16, String) {

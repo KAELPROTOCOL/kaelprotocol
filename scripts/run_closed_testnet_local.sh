@@ -22,10 +22,10 @@ trap cleanup EXIT INT TERM
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "FAIL dependencia ausente: $1" >&2
+    echo "FAIL missing dependency: $1" >&2
     exit 127
   fi
-  echo "PASS dependencia encontrada: $1"
+  echo "PASS dependency found: $1"
 }
 
 stop_old_anvil_on_port() {
@@ -36,7 +36,7 @@ stop_old_anvil_on_port() {
     cmd="${line#* }"
     case "$cmd" in
       *anvil*"--port $port"*|*anvil*"--port=$port"*)
-        echo "Encerrando anvil antigo na porta $port: pid=$pid"
+        echo "Stopping old anvil on port $port: pid=$pid"
         kill "$pid" >/dev/null 2>&1 || true
         ;;
     esac
@@ -48,12 +48,12 @@ wait_rpc() {
   local label="$2"
   for _ in $(seq 1 60); do
     if cast chain-id --rpc-url "$rpc" >/dev/null 2>&1; then
-      echo "PASS $label RPC pronto em $rpc"
+      echo "PASS $label RPC ready at $rpc"
       return 0
     fi
     sleep 1
   done
-  echo "FAIL $label RPC nao ficou pronto: $rpc" >&2
+  echo "FAIL $label RPC did not become ready: $rpc" >&2
   return 1
 }
 
@@ -74,7 +74,33 @@ deploy_htlc() {
   fi
   address="$(awk '/Deployed to:/ {print $3}' "$log_file" | tail -n 1)"
   if [[ -z "$address" ]]; then
-    echo "FAIL nao foi possivel ler endereco do deploy em $log_file" >&2
+    echo "FAIL could not read deployed address from $log_file" >&2
+    cat "$log_file" >&2
+    return 1
+  fi
+  echo "$address"
+}
+
+deploy_settlement() {
+  local rpc="$1"
+  local key="$2"
+  local htlc="$3"
+  local label="$4"
+  local log_file="$LOG_DIR/deploy-settlement-$label.log"
+  local address
+  if ! forge create src/Settlement.sol:Settlement \
+    --root contracts \
+    --rpc-url "$rpc" \
+    --private-key "$key" \
+    --broadcast \
+    --constructor-args "$htlc" \
+    >"$log_file" 2>&1; then
+    cat "$log_file" >&2
+    return 1
+  fi
+  address="$(awk '/Deployed to:/ {print $3}' "$log_file" | tail -n 1)"
+  if [[ -z "$address" ]]; then
+    echo "FAIL could not read deployed address from $log_file" >&2
     cat "$log_file" >&2
     return 1
   fi
@@ -121,11 +147,17 @@ wait_rpc "$KAEL_RPC_B" "chain B"
 
 KAEL_HTLC_A="$(deploy_htlc "$KAEL_RPC_A" "$KAEL_SIGNER_KEY_A" "a")"
 KAEL_HTLC_B="$(deploy_htlc "$KAEL_RPC_B" "$KAEL_SIGNER_KEY_B" "b")"
+KAEL_SETTLEMENT_A="$(deploy_settlement "$KAEL_RPC_A" "$KAEL_SIGNER_KEY_A" "$KAEL_HTLC_A" "a")"
+KAEL_SETTLEMENT_B="$(deploy_settlement "$KAEL_RPC_B" "$KAEL_SIGNER_KEY_B" "$KAEL_HTLC_B" "b")"
 export KAEL_HTLC_A
 export KAEL_HTLC_B
+export KAEL_SETTLEMENT_A
+export KAEL_SETTLEMENT_B
 
 echo "HTLC A: $KAEL_HTLC_A"
 echo "HTLC B: $KAEL_HTLC_B"
+echo "Settlement A: $KAEL_SETTLEMENT_A"
+echo "Settlement B: $KAEL_SETTLEMENT_B"
 echo "Logs: $LOG_DIR"
 
 ./scripts/run_closed_testnet_preflight.sh

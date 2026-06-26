@@ -3860,6 +3860,7 @@ name = "swapkit"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "hex",
  "maestro",
  "orderbook",
  "rand 0.8.6",

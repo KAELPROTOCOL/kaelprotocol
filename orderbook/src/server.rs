@@ -1,9 +1,3 @@
-//! Casca HTTP do livro (Parte 5). O router vive no lib para que tanto o binário
-//! quanto os testes de integração usem EXATAMENTE o mesmo código de produção.
-//!
-//! INVARIANTE: o servidor só INFORMA. Nunca custodia, executa, altera nem
-//! prioriza. O relógio do sistema entra só aqui (na casca), nunca na lógica pura.
-
 use crate::book::{Book, Eip712Verifier, MatchPair, SubmitError};
 use crate::eip712::VerifyError;
 use crate::wire::{self, SubmitRequest, SubmitResponse};
@@ -46,8 +40,6 @@ fn now_unix() -> u64 {
         .as_secs()
 }
 
-/// Sobe o servidor numa porta efêmera (127.0.0.1:0) e devolve a base URL.
-/// Útil para testes de integração e demonstrações do fluxo completo.
 pub async fn spawn_ephemeral() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -78,13 +70,9 @@ async fn submit_order(
     let order = req
         .order
         .into_order(now)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("ordem inválida: {e:?}")))?;
-    let sig = wire::parse_signature(&req.signature).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("assinatura inválida: {e:?}"),
-        )
-    })?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid order: {e:?}")))?;
+    let sig = wire::parse_signature(&req.signature)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid signature: {e:?}")))?;
 
     let mut book = st.book.write().await;
     match book.submit(order, &sig, now) {
@@ -92,17 +80,17 @@ async fn submit_order(
             accepted: true,
             order_hash: format!("0x{}", hex::encode(hash)),
         })),
-        Err(SubmitError::Duplicate) => Err((StatusCode::CONFLICT, "ordem duplicada".into())),
+        Err(SubmitError::Duplicate) => Err((StatusCode::CONFLICT, "duplicate order".into())),
         Err(SubmitError::Verify(v)) => Err((StatusCode::UNPROCESSABLE_ENTITY, verify_msg(v))),
     }
 }
 
 fn verify_msg(v: VerifyError) -> String {
     match v {
-        VerifyError::OrderExpired => "ordem expirada".into(),
-        VerifyError::SignerNotMaker => "assinatura não corresponde ao maker".into(),
-        VerifyError::MalleableS => "assinatura maleável (s alto)".into(),
-        other => format!("assinatura rejeitada: {other:?}"),
+        VerifyError::OrderExpired => "expired order".into(),
+        VerifyError::SignerNotMaker => "signature does not match maker".into(),
+        VerifyError::MalleableS => "malleable signature (high s)".into(),
+        other => format!("signature rejected: {other:?}"),
     }
 }
 
@@ -116,7 +104,7 @@ async fn get_matches(
     Query(q): Query<MatchesQuery>,
 ) -> Result<Json<Vec<MatchPair>>, (StatusCode, String)> {
     let maker = wire::parse_address(&q.maker)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("maker inválido: {e:?}")))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid maker: {e:?}")))?;
     let book = st.book.read().await;
     Ok(Json(book.matches_for(&maker, now_unix())))
 }

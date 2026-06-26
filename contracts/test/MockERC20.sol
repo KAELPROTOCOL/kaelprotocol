@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @notice ERC-20 mínimo apenas para testes (mint aberto).
+/// @notice Minimal ERC-20 for tests only, with open minting.
 contract MockERC20 {
     string public name = "Mock";
     string public symbol = "MOCK";

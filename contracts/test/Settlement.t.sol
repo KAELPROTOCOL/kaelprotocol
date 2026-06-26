@@ -7,33 +7,22 @@ import {OrderLib} from "../src/Order.sol";
 import {HashedTimelock} from "../src/HashedTimelock.sol";
 import {MockERC20} from "./MockERC20.sol";
 
-// NOTA DE ARQUITETURA (Abordagem A): a validação cross-leg on-chain foi REMOVIDA.
-// Os testes que a exercitavam não existem mais aqui, porque a lógica que testavam
-// não existe mais no contrato. Cada um migrou para a CARTEIRA:
-//   - test_SettleLeg_NotMirrored_Reverts: o espelhamento contra uma counterOrder
-//     alegada não era garantia real (counterOrder não-assinada, não-vinculada à
-//     outra chain). A carteira é que confere a perna oposta on-chain.
-//   - test_SettleLeg_HashlockMismatch_Reverts: "mesmo hashlock nas duas pernas" é
-//     inoperante cross-chain (legCount sempre 0 por chain). A carteira copia o
-//     hashlock da trava oposta que ela leu on-chain.
-//   - test_SettleLeg_TimelockGapTooSmall_Reverts: o gap seguro depende de ver as
-//     duas pernas. A carteira do respondente verifica o timelock da perna oposta
-//     (já visível on-chain) ANTES de travar a sua.
-//   - test_SettleLeg_SameSwapSameLeg_Reverts: dependia de swaps[swapId]/legCount,
-//     removidos. O re-travar a mesma perna é barrado agora pelo nonce (mesma chain)
-//     e, em última instância, pelo HTLC (SwapAlreadyExists).
+// Architecture note (Approach A): cross-leg validation is wallet-side, not
+// on-chain. Each Settlement is per-chain and validates only its local leg. The
+// wallet verifies the observed counterparty leg before broadcasting, while the
+// HTLC contractId binds sender, recipient, token, amount, hashlock, and timelock.
 contract SettlementTest is Test {
     Settlement settlement;
     HashedTimelock htlc;
-    MockERC20 token; // o ativo "Y" da perna ERC-20
+    MockERC20 token; // ERC-20 asset for the token leg.
 
     uint256 makerPk = 0xA11CE;
-    address maker; // autorização pura
+    address maker; // pure authorization tests.
 
     uint256 alicePk = 0xA11CE;
     uint256 bobPk = 0xB0B;
-    address alice; // vende ETH
-    address bob; // vende ERC-20
+    address alice; // sells ETH.
+    address bob; // sells ERC-20.
 
     bytes32 preimage = keccak256("kael-secret");
     bytes32 HL;
@@ -45,7 +34,7 @@ contract SettlementTest is Test {
 
     function setUp() public {
         htlc = new HashedTimelock();
-        settlement = new Settlement(address(htlc)); // HTLC canônico fixado no deploy
+        settlement = new Settlement(address(htlc)); // Canonical HTLC fixed at deploy.
         token = new MockERC20();
         maker = vm.addr(makerPk);
         alice = vm.addr(alicePk);
@@ -62,7 +51,7 @@ contract SettlementTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    // ===================== autorização pura (mantida) =====================
+    // ===================== Pure authorization =====================
 
     function _order(uint256 nonce) internal view returns (OrderLib.Order memory o) {
         o = OrderLib.Order({
@@ -115,9 +104,9 @@ contract SettlementTest is Test {
         assertTrue(settlement.consumedNonce(maker, 8));
     }
 
-    // ===================== liquidação de UMA perna (Abordagem A) =====================
+    // ===================== Single-leg settlement (Approach A) =====================
 
-    // Alice vende ETH NESTA chain (sellChainId == block.chainid).
+    // Alice sells ETH on this chain (sellChainId == block.chainid).
     function _orderA(uint256 nonce) internal view returns (OrderLib.Order memory o) {
         o = OrderLib.Order({
             maker: alice,
@@ -132,7 +121,7 @@ contract SettlementTest is Test {
         });
     }
 
-    // Bob vende ERC-20 NESTA chain (sellChainId == block.chainid).
+    // Bob sells ERC-20 on this chain (sellChainId == block.chainid).
     function _orderB(uint256 nonce) internal view returns (OrderLib.Order memory o) {
         o = OrderLib.Order({
             maker: bob,
@@ -166,8 +155,8 @@ contract SettlementTest is Test {
         vm.stopPrank();
     }
 
-    // caminho feliz: as duas pernas travam no HTLC com recipient explícito;
-    // fundos saem dos makers; o Settlement não retém nada.
+    // Happy path: both legs lock in the HTLC with explicit recipients; funds
+    // leave makers and Settlement retains nothing.
     function test_SettleLeg_HappyPath_BothLegsLocked() public {
         OrderLib.Order memory a = _orderA(1);
         OrderLib.Order memory b = _orderB(2);
@@ -198,14 +187,74 @@ contract SettlementTest is Test {
         assertEq(token.balanceOf(bob), bobTokBefore - TOK_AMT);
         assertEq(address(htlc).balance, ETH_AMT);
         assertEq(token.balanceOf(address(htlc)), TOK_AMT);
-        assertEq(address(settlement).balance, 0, "Settlement nao retem ETH");
-        assertEq(token.balanceOf(address(settlement)), 0, "Settlement nao retem TOK");
+        assertEq(address(settlement).balance, 0, "Settlement retains no ETH");
+        assertEq(token.balanceOf(address(settlement)), 0, "Settlement retains no token");
     }
 
-    // BINDING DE CHAIN (novo): ordem cujo sellChainId != block.chainid reverte.
+    function test_SettleLeg_ContractIdBindsRecipientHashlockAndTimelock() public {
+        OrderLib.Order memory a = _orderA(1);
+        uint256 tlA = block.timestamp + 2 hours;
+        bytes32 cidA = _settleEthLeg(a, bob, HL, tlA);
+
+        bytes32 wrongRecipient = htlc.computeContractId(address(settlement), alice, address(0), ETH_AMT, HL, tlA);
+        bytes32 wrongHashlock = htlc.computeContractId(
+            address(settlement), bob, address(0), ETH_AMT, sha256(abi.encodePacked("wrong")), tlA
+        );
+        bytes32 wrongTimelock = htlc.computeContractId(address(settlement), bob, address(0), ETH_AMT, HL, tlA + 1);
+
+        assertEq(cidA, htlc.computeContractId(address(settlement), bob, address(0), ETH_AMT, HL, tlA));
+        assertEq(htlc.getSwap(cidA).recipient, bob);
+        assertEq(htlc.getSwap(cidA).hashlock, HL);
+        assertEq(htlc.getSwap(cidA).timelock, tlA);
+        assertEq(htlc.getSwap(wrongRecipient).sender, address(0));
+        assertEq(htlc.getSwap(wrongHashlock).sender, address(0));
+        assertEq(htlc.getSwap(wrongTimelock).sender, address(0));
+    }
+
+    function test_SettleLeg_ZeroAmount_RevertsAndDoesNotConsumeNonce() public {
+        OrderLib.Order memory a = _orderA(1);
+        a.sellAmount = 0;
+        bytes memory sigA = _sign(a, alicePk);
+
+        vm.prank(alice);
+        vm.expectRevert(HashedTimelock.ZeroAmount.selector);
+        settlement.settleLeg{value: 0}(a, sigA, bob, HL, block.timestamp + 2 hours);
+
+        assertFalse(settlement.consumedNonce(alice, 1), "nonce remains available after reverted zero-amount settle");
+        assertEq(address(settlement).balance, 0);
+        assertEq(address(htlc).balance, 0);
+    }
+
+    function test_SettleLeg_ZeroHashlock_RevertsAndDoesNotConsumeNonce() public {
+        OrderLib.Order memory a = _orderA(1);
+        bytes memory sigA = _sign(a, alicePk);
+
+        vm.prank(alice);
+        vm.expectRevert(HashedTimelock.ZeroHashlock.selector);
+        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, bytes32(0), block.timestamp + 2 hours);
+
+        assertFalse(settlement.consumedNonce(alice, 1), "nonce remains available after reverted zero-hashlock settle");
+        assertEq(address(settlement).balance, 0);
+        assertEq(address(htlc).balance, 0);
+    }
+
+    function test_SettleLeg_TimelockInPast_RevertsAndDoesNotConsumeNonce() public {
+        OrderLib.Order memory a = _orderA(1);
+        bytes memory sigA = _sign(a, alicePk);
+
+        vm.prank(alice);
+        vm.expectRevert(HashedTimelock.TimelockInPast.selector);
+        settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, block.timestamp);
+
+        assertFalse(settlement.consumedNonce(alice, 1), "nonce remains available after reverted timelock settle");
+        assertEq(address(settlement).balance, 0);
+        assertEq(address(htlc).balance, 0);
+    }
+
+    // Chain binding: an order with sellChainId != block.chainid reverts.
     function test_SettleLeg_WrongChain_Reverts() public {
         OrderLib.Order memory a = _orderA(1);
-        a.sellChainId = block.chainid + 1; // ordem para OUTRA chain
+        a.sellChainId = block.chainid + 1; // Order for another chain.
         bytes memory sigA = _sign(a, alicePk);
         uint256 before = alice.balance;
 
@@ -213,35 +262,34 @@ contract SettlementTest is Test {
         vm.expectRevert(Settlement.WrongChain.selector);
         settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, block.timestamp + 2 hours);
 
-        assertEq(alice.balance, before, "nada saiu de Alice");
+        assertEq(alice.balance, before, "nothing left Alice");
     }
 
-    // SÓ O MAKER LIQUIDA: um terceiro não pode liquidar a ordem de outro (ETH).
+    // Only the maker settles: a third party cannot settle another maker's order.
     function test_SettleLeg_NotMaker_Reverts() public {
         OrderLib.Order memory a = _orderA(1);
-        bytes memory sigA = _sign(a, alicePk); // ordem ASSINADA por Alice
+        bytes memory sigA = _sign(a, alicePk); // Order signed by Alice.
         address attacker = address(0xBAD);
         vm.deal(attacker, 10 ether);
         uint256 aliceBefore = alice.balance;
 
-        // mesmo com a ordem+assinatura válidas de Alice, o atacante não é o maker
+        // Even with Alice's valid order+signature, attacker is not the maker.
         vm.prank(attacker);
         vm.expectRevert(Settlement.NotOrderMaker.selector);
         settlement.settleLeg{value: ETH_AMT}(a, sigA, attacker, HL, block.timestamp + 2 hours);
 
-        assertEq(alice.balance, aliceBefore, "nada de Alice se moveu");
-        assertEq(address(htlc).balance, 0, "nada travado");
-        assertFalse(settlement.consumedNonce(alice, 1), "nonce de Alice intacto");
+        assertEq(alice.balance, aliceBefore, "Alice funds did not move");
+        assertEq(address(htlc).balance, 0, "nothing locked");
+        assertFalse(settlement.consumedNonce(alice, 1), "Alice nonce intact");
     }
 
-    // VETOR DE ROUBO ERC-20 FECHADO: Bob deu approve ao Settlement; um atacante
-    // tenta liquidar a ordem do Bob com recipient/hashlock próprios para drenar
-    // os tokens. Prova que a APROVAÇÃO SOZINHA não basta — só o maker liquida.
+    // ERC-20 theft vector closed: approval alone is not enough; only the maker
+    // can settle the maker's own order.
     function test_SettleLeg_NotMaker_ERC20_ApprovalAloneCannotSteal() public {
         OrderLib.Order memory b = _orderB(2);
-        bytes memory sigB = _sign(b, bobPk); // ordem ASSINADA por Bob
+        bytes memory sigB = _sign(b, bobPk); // Order signed by Bob.
 
-        // pré-condição do "roubo": Bob aprova o Settlement
+        // Theft precondition: Bob approved Settlement.
         vm.prank(bob);
         token.approve(address(settlement), TOK_AMT);
 
@@ -249,23 +297,47 @@ contract SettlementTest is Test {
         address attacker = address(0xBAD);
         bytes32 attackerHL = sha256(abi.encodePacked(keccak256("attacker-secret")));
 
-        // atacante tenta liquidar a perna do Bob com recipient = atacante
+        // Attacker tries to settle Bob's leg with attacker as recipient.
         vm.prank(attacker);
         vm.expectRevert(Settlement.NotOrderMaker.selector);
         settlement.settleLeg(b, sigB, attacker, attackerHL, block.timestamp + 2 hours);
 
-        // a aprovação sozinha NÃO permitiu roubo: tokens do Bob intactos
-        assertEq(token.balanceOf(bob), bobBefore, "tokens do Bob intactos");
-        assertEq(token.balanceOf(address(htlc)), 0, "nada travado no HTLC");
-        assertEq(token.balanceOf(address(settlement)), 0, "Settlement nao reteve token");
-        assertFalse(settlement.consumedNonce(bob, 2), "nonce do Bob nao consumido");
+        assertEq(token.balanceOf(bob), bobBefore, "Bob tokens intact");
+        assertEq(token.balanceOf(address(htlc)), 0, "nothing locked in HTLC");
+        assertEq(token.balanceOf(address(settlement)), 0, "Settlement retained no token");
+        assertFalse(settlement.consumedNonce(bob, 2), "Bob nonce not consumed");
     }
 
-    // anti-replay per-chain: a MESMA ordem/nonce duas vezes → 2ª reverte, sem mover fundos.
+    function test_SettleLeg_ERC20_InsufficientAllowance_Reverts() public {
+        OrderLib.Order memory b = _orderB(2);
+        bytes memory sigB = _sign(b, bobPk);
+
+        vm.prank(bob);
+        vm.expectRevert(Settlement.TokenTransferFailed.selector);
+        settlement.settleLeg(b, sigB, alice, HL, block.timestamp + 2 hours);
+
+        assertFalse(settlement.consumedNonce(bob, 2), "Bob nonce not consumed");
+        assertEq(token.balanceOf(address(settlement)), 0);
+        assertEq(token.balanceOf(address(htlc)), 0);
+    }
+
+    function test_SettleLeg_ERC20_EoaToken_Reverts() public {
+        OrderLib.Order memory b = _orderB(2);
+        b.sellToken = address(0xBEEF);
+        bytes memory sigB = _sign(b, bobPk);
+
+        vm.prank(bob);
+        vm.expectRevert(Settlement.InvalidToken.selector);
+        settlement.settleLeg(b, sigB, alice, HL, block.timestamp + 2 hours);
+
+        assertFalse(settlement.consumedNonce(bob, 2), "Bob nonce not consumed");
+    }
+
+    // Per-chain anti-replay: the same order/nonce twice reverts on the second attempt.
     function test_SettleLeg_Replay_Reverts() public {
         OrderLib.Order memory a = _orderA(1);
         uint256 tlA = block.timestamp + 2 hours;
-        _settleEthLeg(a, bob, HL, tlA); // 1ª: ok
+        _settleEthLeg(a, bob, HL, tlA);
 
         uint256 aliceAfterFirst = alice.balance;
         bytes memory sigA = _sign(a, alicePk);
@@ -273,12 +345,12 @@ contract SettlementTest is Test {
         vm.expectRevert(Settlement.NonceAlreadyUsed.selector);
         settlement.settleLeg{value: ETH_AMT}(a, sigA, bob, HL, tlA);
 
-        assertEq(alice.balance, aliceAfterFirst, "nenhum ETH a mais saiu de Alice");
-        assertEq(address(htlc).balance, ETH_AMT, "HTLC so tem a 1a trava");
+        assertEq(alice.balance, aliceAfterFirst, "no extra ETH left Alice");
+        assertEq(address(htlc).balance, ETH_AMT, "HTLC only has the first lock");
         assertEq(address(settlement).balance, 0);
     }
 
-    // assinatura inválida → reverte via OrderLib, fundos não movidos.
+    // Invalid signature reverts through OrderLib and moves no funds.
     function test_SettleLeg_BadSignature_Reverts() public {
         OrderLib.Order memory a = _orderA(1);
         bytes memory badSig = _sign(a, 0xBEEF);
@@ -292,7 +364,7 @@ contract SettlementTest is Test {
         assertEq(address(settlement).balance, 0);
     }
 
-    // ordem expirada → reverte via OrderLib, fundos não movidos.
+    // Expired order reverts through OrderLib and moves no funds.
     function test_SettleLeg_Expired_Reverts() public {
         OrderLib.Order memory a = _orderA(1);
         a.validUntil = block.timestamp - 1;
@@ -306,7 +378,7 @@ contract SettlementTest is Test {
         assertEq(alice.balance, before);
     }
 
-    // reembolso: após expirar, refundLeg devolve AO MAKER (não ao caller).
+    // Refund: after expiry, refundLeg returns funds to the maker, not the caller.
     function test_RefundLeg_ReturnsToMaker() public {
         OrderLib.Order memory a = _orderA(1);
         uint256 tlA = block.timestamp + 2 hours;
@@ -320,10 +392,10 @@ contract SettlementTest is Test {
         vm.prank(carol);
         settlement.refundLeg(cidA);
 
-        assertEq(alice.balance, aliceBefore + ETH_AMT, "ETH volta ao maker");
-        assertEq(carol.balance, carolBefore, "caller nao recebe nada");
-        assertEq(address(settlement).balance, 0, "Settlement zera");
-        assertEq(address(htlc).balance, 0, "HTLC liberou a trava");
+        assertEq(alice.balance, aliceBefore + ETH_AMT, "ETH returns to maker");
+        assertEq(carol.balance, carolBefore, "caller receives nothing");
+        assertEq(address(settlement).balance, 0, "Settlement balance is zero");
+        assertEq(address(htlc).balance, 0, "HTLC released the lock");
     }
 
     function test_RefundLeg_DoubleRefund_Reverts() public {
@@ -336,19 +408,19 @@ contract SettlementTest is Test {
         settlement.refundLeg(cidA);
     }
 
-    // perna JÁ RESGATADA não pode ser reembolsada (o HTLC reverte).
+    // An already redeemed leg cannot be refunded; the HTLC reverts.
     function test_RefundLeg_AfterRedeem_Reverts() public {
         OrderLib.Order memory a = _orderA(1);
         uint256 tlA = block.timestamp + 2 hours;
         bytes32 cidA = _settleEthLeg(a, bob, HL, tlA);
 
-        htlc.redeem(cidA, preimage); // bob (recipient) resgata antes do prazo
+        htlc.redeem(cidA, preimage); // Bob, the recipient, redeems before expiry.
 
         vm.expectRevert(HashedTimelock.AlreadyWithdrawn.selector);
         settlement.refundLeg(cidA);
     }
 
-    // NÃO-CUSTÓDIA: nenhum saldo retido fora de trânsito; só newSwap e refundLeg→maker.
+    // Non-custody: no retained balance outside in-flight calls.
     function test_NonCustody_NoRetainedBalance() public {
         OrderLib.Order memory a = _orderA(1);
         OrderLib.Order memory b = _orderB(2);
@@ -364,7 +436,7 @@ contract SettlementTest is Test {
         uint256 aliceBefore = alice.balance;
         settlement.refundLeg(cidA);
         assertEq(alice.balance, aliceBefore + ETH_AMT);
-        assertEq(address(settlement).balance, 0, "sem saldo retido");
+        assertEq(address(settlement).balance, 0, "no retained balance");
         assertEq(token.balanceOf(address(settlement)), 0);
     }
 }

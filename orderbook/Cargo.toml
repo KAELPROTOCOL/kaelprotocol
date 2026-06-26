@@ -15,7 +15,7 @@ path = "src/bin/server.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Verificação EIP-712 (Parte 5)
+# EIP-712 verification (Part 5)
 k256 = { version = "0.13", features = ["ecdsa"] }
 sha3 = "0.10"
 hex = "0.4"

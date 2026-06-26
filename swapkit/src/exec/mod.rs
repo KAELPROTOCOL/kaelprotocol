@@ -1,21 +1,21 @@
-//! O EXECUTOR — a camada que REALIZA no mundo o que a máquina de estados DECIDE.
+//! The executor is the side-effecting layer that performs what the state machine decides.
 //!
-//! O núcleo puro (`verify`, `sm`, `handshake`) decide; este módulo assina e envia
-//! transações, lê confirmações e dirige o laço. Tudo que tem efeito colateral
-//! (chaves, rede, relógio) vive AQUI, isolado em submódulos — o núcleo continua
-//! puro e testável sem mundo.
+//! The pure core (`verify`, `sm`, `handshake`) decides; this module signs and
+//! sends transactions, reads confirmations, and drives the loop. Everything with
+//! side effects (keys, network, clock) lives here so the core stays pure and
+//! testable without the outside world.
 //!
-//! Construído em peças testáveis, na ordem de dependência:
-//! 1. [`signer`] — chave + guard allowlist (esta peça).
-//! 2. interface `observe_lock` com `min_confirmations` (próxima).
+//! Built in testable pieces, in dependency order:
+//! 1. [`signer`] - key + allowlist guard.
+//! 2. `observe_lock` with `min_confirmations`.
 //! 3. `tx` — lock/redeem/refund.
-//! 4. `observe` + `confirm` — descoberta por hashlock (maestro) + profundidade N.
-//! 5. `mod` — o laço + a re-verificação no último instante (anti-TOCTOU).
+//! 4. `observe` + `confirm` - hashlock discovery (maestro) + N-depth confirmation.
+//! 5. `mod` - the loop + last-instant re-verification (anti-TOCTOU).
 
 use crate::chain::{ChainError, RpcVerifier};
 use crate::exec::observe::CounterpartyObserver;
 use crate::exec::signer::Signer;
-use crate::exec::tx::TxError;
+use crate::exec::tx::{SettlementLockConfig, TxError};
 use crate::sm::{advance, next_action, AbortReason, NextAction, SwapContext, SwapEvent, SwapState};
 use crate::verify::Address;
 use alloy::providers::{Provider, ProviderBuilder};
@@ -27,7 +27,7 @@ pub mod observe;
 pub mod signer;
 pub mod tx;
 
-/// Relógio injetável para o executor. Testes podem avançar timelock sem sleep real.
+/// Injectable clock for the executor. Tests can advance timelocks without sleeping.
 pub trait Clock {
     fn now(&self) -> u64;
 }
@@ -39,8 +39,8 @@ impl Clock for SystemClock {
     fn now(&self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("system clock before unix epoch")
-            .as_secs()
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0)
     }
 }
 
@@ -57,14 +57,14 @@ pub enum ExecutorError {
 impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExecutorError::MissingHashlock => write!(f, "hashlock ausente no contexto do executor"),
-            ExecutorError::MissingOwnContractId => write!(f, "contractId da minha perna ausente"),
+            ExecutorError::MissingHashlock => write!(f, "hashlock missing from executor context"),
+            ExecutorError::MissingOwnContractId => write!(f, "own-leg contractId missing"),
             ExecutorError::MissingCounterpartyContractId => {
-                write!(f, "contractId da perna oposta ausente")
+                write!(f, "counterparty-leg contractId missing")
             }
-            ExecutorError::Chain(e) => write!(f, "erro de chain: {e}"),
-            ExecutorError::Tx(e) => write!(f, "erro de tx: {e}"),
-            ExecutorError::MaxStepsExceeded => write!(f, "executor excedeu o limite de passos"),
+            ExecutorError::Chain(e) => write!(f, "chain error: {e}"),
+            ExecutorError::Tx(e) => write!(f, "tx error: {e}"),
+            ExecutorError::MaxStepsExceeded => write!(f, "executor exceeded step limit"),
         }
     }
 }
@@ -94,11 +94,11 @@ pub enum StepOutcome {
     Aborted(AbortReason),
 }
 
-/// Executor concreto do MVP EVM/anvil.
+/// Concrete executor for the EVM/anvil MVP.
 ///
-/// Ele mantém a regra central: observa o mundo, chama `next_action`, re-observa
-/// imediatamente antes de lock/redeem, e só transmite se a ação atual ainda for
-/// exatamente a ação planejada pela state machine.
+/// It keeps the central rule: observe the world, call `next_action`, re-observe
+/// immediately before lock/redeem, and only broadcast if the current action still
+/// matches the action planned by the state machine.
 pub struct WalletExecutor<C: Clock> {
     pub state: SwapState,
     pub ctx: SwapContext,
@@ -106,6 +106,7 @@ pub struct WalletExecutor<C: Clock> {
     counterparty_signer: Signer,
     own_htlc: Address,
     counterparty_htlc: Address,
+    own_settlement_lock: Option<SettlementLockConfig>,
     own_observer: CounterpartyObserver<RpcVerifier>,
     counterparty_observer: CounterpartyObserver<RpcVerifier>,
     clock: C,
@@ -121,6 +122,7 @@ pub struct WalletExecutorConfig<C: Clock> {
     pub counterparty_signer: Signer,
     pub own_htlc: Address,
     pub counterparty_htlc: Address,
+    pub own_settlement_lock: Option<SettlementLockConfig>,
     pub own_observer: CounterpartyObserver<RpcVerifier>,
     pub counterparty_observer: CounterpartyObserver<RpcVerifier>,
     pub clock: C,
@@ -136,6 +138,7 @@ impl<C: Clock> WalletExecutor<C> {
             counterparty_signer: config.counterparty_signer,
             own_htlc: config.own_htlc,
             counterparty_htlc: config.counterparty_htlc,
+            own_settlement_lock: config.own_settlement_lock,
             own_observer: config.own_observer,
             counterparty_observer: config.counterparty_observer,
             clock: config.clock,
@@ -212,16 +215,32 @@ impl<C: Clock> WalletExecutor<C> {
                     self.state = advance(self.state, SwapEvent::MyLegConfirmed);
                     return Ok(StepOutcome::Waiting);
                 }
-                let locked = tx::lock(
-                    &self.own_signer,
-                    self.own_htlc,
-                    recipient,
-                    token,
-                    amount,
-                    hashlock,
-                    timelock,
-                )
-                .await?;
+                let locked = match &self.own_settlement_lock {
+                    Some(settlement) => {
+                        tx::lock_via_settlement(
+                            &self.own_signer,
+                            settlement,
+                            recipient,
+                            token,
+                            amount,
+                            hashlock,
+                            timelock,
+                        )
+                        .await?
+                    }
+                    None => {
+                        tx::lock(
+                            &self.own_signer,
+                            self.own_htlc,
+                            recipient,
+                            token,
+                            amount,
+                            hashlock,
+                            timelock,
+                        )
+                        .await?
+                    }
+                };
                 self.own_contract_id = Some(locked.contract_id);
                 self.ctx.my_leg_locked = true;
                 self.state = advance(self.state, SwapEvent::MyLegConfirmed);
@@ -257,7 +276,15 @@ impl<C: Clock> WalletExecutor<C> {
                 let cid = self
                     .own_contract_id
                     .ok_or(ExecutorError::MissingOwnContractId)?;
-                tx::refund(&self.own_signer, self.own_htlc, cid).await?;
+                match &self.own_settlement_lock {
+                    Some(settlement) => {
+                        tx::refund_via_settlement(&self.own_signer, settlement.settlement, cid)
+                            .await?;
+                    }
+                    None => {
+                        tx::refund(&self.own_signer, self.own_htlc, cid).await?;
+                    }
+                }
                 self.state = advance(SwapState::Refunding, SwapEvent::RefundConfirmed);
                 Ok(StepOutcome::RefundedMyLeg)
             }
@@ -461,6 +488,7 @@ mod tests {
             counterparty_signer,
             own_htlc: fixture.own_htlc,
             counterparty_htlc: fixture.cp_htlc,
+            own_settlement_lock: None,
             own_observer: rpc_observer(fixture.own_rpc, fixture.own_htlc, fixture.own_chain_id)
                 .unwrap(),
             counterparty_observer: rpc_observer(

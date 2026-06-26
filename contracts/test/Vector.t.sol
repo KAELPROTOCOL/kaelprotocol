@@ -4,12 +4,9 @@ pragma solidity ^0.8.20;
 import {Test, console2} from "forge-std/Test.sol";
 import {OrderLib} from "../src/Order.sol";
 
-/// Gera o vetor de equivalência on-chain/off-chain. Roda com:
 ///   forge test --match-test test_EmitVector -vv
-/// Os valores impressos são a verdade-base para o verificador em Rust (Parte 5).
 contract VectorTest is Test {
     function test_EmitVector() public {
-        // Chave privada fixa e conhecida (NÃO usar com fundos reais).
         uint256 pk = 0x00000000000000000000000000000000000000000000000000000000c0ffee01;
         address maker = vm.addr(pk);
 
@@ -45,7 +42,6 @@ contract VectorTest is Test {
         console2.log("v");
         console2.logUint(v);
 
-        // sanity: o vetor verifica com a própria biblioteca
         bytes memory sig = abi.encodePacked(r, s, v);
         assertEq(OrderLib.verify(o, sig, o.validUntil - 1), digest);
     }

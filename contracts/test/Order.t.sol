@@ -4,7 +4,6 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {OrderLib} from "../src/Order.sol";
 
-/// Wrapper para expor as funções internal da biblioteca aos testes.
 contract OrderHarness {
     function hash(OrderLib.Order memory o) external pure returns (bytes32) {
         return OrderLib.hash(o);
@@ -45,7 +44,6 @@ contract OrderTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    // 1) assinatura válida recupera o maker
     function test_ValidSignature_RecoversMaker() public {
         OrderLib.Order memory o = _order();
         bytes memory sig = _sign(o, makerPk);
@@ -53,24 +51,21 @@ contract OrderTest is Test {
         assertEq(oh, h.hash(o));
     }
 
-    // 2) ordem adulterada não recupera o maker
     function test_TamperedOrder_Reverts() public {
         OrderLib.Order memory o = _order();
         bytes memory sig = _sign(o, makerPk);
-        o.buyAmount = 9999e6; // adultera após assinar
+        o.buyAmount = 9999e6; // tampered after signing
         vm.expectRevert(OrderLib.SignerNotMaker.selector);
         h.verify(o, sig, o.validUntil - 1);
     }
 
-    // 3) signatário errado é rejeitado
     function test_WrongSigner_Reverts() public {
         OrderLib.Order memory o = _order();
-        bytes memory sig = _sign(o, 0xB0B); // chave diferente do maker
+        bytes memory sig = _sign(o, 0xB0B); // different key from maker
         vm.expectRevert(OrderLib.SignerNotMaker.selector);
         h.verify(o, sig, o.validUntil - 1);
     }
 
-    // 4) ordem expirada é rejeitada
     function test_ExpiredOrder_Reverts() public {
         OrderLib.Order memory o = _order();
         bytes memory sig = _sign(o, makerPk);
@@ -78,7 +73,6 @@ contract OrderTest is Test {
         h.verify(o, sig, o.validUntil + 1);
     }
 
-    // 5) limite exato de expiração ainda é válido
     function test_ExpiryBoundary_StillValid() public {
         OrderLib.Order memory o = _order();
         bytes memory sig = _sign(o, makerPk);
@@ -94,11 +88,9 @@ contract OrderTest is Test {
         assertTrue(h.hash(a) != h.hash(b));
     }
 
-    // extra: endurecimento ECDSA — s alto é rejeitado
     function test_MalleableS_Reverts() public {
         OrderLib.Order memory o = _order();
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(makerPk, h.hash(o));
-        // flip para a metade alta da curva => maleável
         uint256 n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
         bytes32 sHigh = bytes32(n - uint256(s));
         uint8 vFlip = v == 27 ? 28 : 27;
@@ -107,18 +99,16 @@ contract OrderTest is Test {
         h.verify(o, sig, o.validUntil - 1);
     }
 
-    // ===== GRUPO 3 — reverts faltantes da OrderLib =====
 
     // v fora de {27,28} => InvalidV. (s baixo, passa o check de maleabilidade.)
     function test_InvalidV_Reverts() public {
         OrderLib.Order memory o = _order();
         (, bytes32 r, bytes32 s) = vm.sign(makerPk, h.hash(o));
-        bytes memory sig = abi.encodePacked(r, s, uint8(29)); // v inválido
+        bytes memory sig = abi.encodePacked(r, s, uint8(29)); // invalid v
         vm.expectRevert(OrderLib.InvalidV.selector);
         h.verify(o, sig, o.validUntil - 1);
     }
 
-    // comprimento ≠ 65 => InvalidSignatureLength.
     function test_InvalidSignatureLength_Reverts() public {
         OrderLib.Order memory o = _order();
         (, bytes32 r, bytes32 s) = vm.sign(makerPk, h.hash(o));
@@ -127,8 +117,6 @@ contract OrderTest is Test {
         h.verify(o, sig, o.validUntil - 1);
     }
 
-    // r = 0 força ecrecover a devolver address(0) => ZeroSigner.
-    // (s baixo e v=27 passam os checks anteriores; o recover é que zera.)
     function test_ZeroSigner_Reverts() public {
         OrderLib.Order memory o = _order();
         (, , bytes32 s) = vm.sign(makerPk, h.hash(o));
