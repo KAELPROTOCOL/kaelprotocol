@@ -85,8 +85,8 @@ mod tests {
     use crate::sm::{next_action, NextAction, SwapState};
     use crate::verify::ObservedLock;
 
-    const X: u8 = 0x11; // ativo na chain 1
-    const Y: u8 = 0x22; // ativo na chain 10
+    const X: u8 = 0x11; // asset on chain 1
+    const Y: u8 = 0x22; // asset on chain 10
 
     #[allow(clippy::too_many_arguments)]
     fn ord(

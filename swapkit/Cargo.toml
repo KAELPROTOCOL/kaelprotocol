@@ -21,6 +21,7 @@ alloy = { version = "1.0", features = [
     "rpc-types-eth",
     "network",
     "reqwest",
+    "node-bindings",
     # Local secp256k1 signing for executor lock/redeem/refund transactions.
     # This used to be test-only for anvil tests; the executor is production code.
     "signer-local",
@@ -32,6 +33,7 @@ maestro = { path = "../maestro" }
 rand = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 hex = "0.4"
+serde_json = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["time", "sync"] }

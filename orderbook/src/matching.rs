@@ -1,15 +1,15 @@
 //!
 //!
-//!    Cruza quando ambos recebem ao menos o que pediram:
+//!    Orders cross when both sides receive at least what they asked for:
 //!
 //!    ```text
-//!    A.sell_amount >= B.buy_amount   (A entrega X suficiente para B)
-//!    B.sell_amount >= A.buy_amount   (B entrega Y suficiente para A)
+//!    A.sell_amount >= B.buy_amount   (A gives enough X to B)
+//!    B.sell_amount >= A.buy_amount   (B gives enough Y to A)
 //!    ```
 
 use crate::order::Order;
 
-/// Espelhamento estrito de tokens E chains entre as duas pernas.
+/// Strict token and chain mirroring between the two legs.
 fn mirrors(a: &Order, b: &Order) -> bool {
     a.sell_token == b.buy_token
         && a.sell_chain_id == b.buy_chain_id
@@ -25,7 +25,7 @@ pub fn compatible(a: &Order, b: &Order, now: u64) -> bool {
     !a.is_expired(now) && !b.is_expired(now) && mirrors(a, b) && crosses(a, b)
 }
 
-/// Entre os `makers`, escolhe o melhor para `taker` por price-time.
+/// Chooses the best maker candidate for the taker by price-time priority.
 ///
 pub fn best_match_for(taker: &Order, makers: &[Order], now: u64) -> Option<usize> {
     if taker.is_expired(now) {
@@ -95,10 +95,10 @@ mod tests {
         [b; 20]
     }
 
-    const X: u8 = 0x11; // token na chain 1
-    const Y: u8 = 0x22; // token na chain 10
+    const X: u8 = 0x11; // token on chain 1
+    const Y: u8 = 0x22; // token on chain 10
 
-    /// A vende `sell` de X (chain 1), quer `buy` de Y (chain 10).
+    /// A sells `sell` of X on chain 1 and wants `buy` of Y on chain 10.
     fn order_a(sell: u128, buy: u128, valid_until: u64, created_at: u64, nonce: u64) -> Order {
         Order {
             maker: addr(0xAA),
@@ -114,7 +114,7 @@ mod tests {
         }
     }
 
-    /// B (espelho) vende `sell` de Y (chain 10), quer `buy` de X (chain 1).
+    /// B is the mirror: sells `sell` of Y on chain 10 and wants `buy` of X on chain 1.
     fn order_b(sell: u128, buy: u128, valid_until: u64, created_at: u64, nonce: u64) -> Order {
         Order {
             maker: addr(0xBB),
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn same_direction_no_match() {
         let a1 = order_a(100, 200, 1000, 1, 0);
-        let a2 = order_a(100, 200, 1000, 1, 1); // ambos vendem X
+        let a2 = order_a(100, 200, 1000, 1, 1); // both sell X
         assert!(!compatible(&a1, &a2, 500));
         assert_eq!(find_match(&[a1, a2], 500), None);
     }

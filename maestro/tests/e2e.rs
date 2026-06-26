@@ -1,9 +1,9 @@
-//! Teste end-to-end (Parte 3 + base da Parte 6).
+//! End-to-end test for watcher correlation.
 //!
-//! Sobe DUAS chains anvil locais, faz deploy do HTLC em cada, executa um swap
-//! em B revela o preimage) e prova que o maestro:
-//!   1. detecta as duas travas e as correlaciona pelo hashlock SHA-256;
-//!   2. captura o preimage revelado.
+//! Starts two local Anvil chains, deploys an HTLC on each, executes a swap where
+//! chain B reveals the preimage, and proves that maestro:
+//!   1. detects both locks and correlates them by SHA-256 hashlock;
+//!   2. captures the revealed preimage.
 //!
 
 use alloy::network::EthereumWallet;
@@ -42,15 +42,15 @@ async fn spawn_chain(
 
 #[tokio::test]
 async fn cross_chain_swap_is_correlated_and_preimage_captured() {
-    // --- duas chains independentes ---
+    // --- two independent chains ---
     let (_anvil_a, prov_a, sender_a) = spawn_chain(1).await;
     let (_anvil_b, prov_b, sender_b) = spawn_chain(10).await;
 
-    // --- deploy do HTLC em cada chain ---
+    // --- deploy HTLC on each chain ---
     let htlc_a = HashedTimelock::deploy(prov_a.clone()).await.unwrap();
     let htlc_b = HashedTimelock::deploy(prov_b.clone()).await.unwrap();
 
-    // --- termos do swap ---
+    // --- swap terms ---
     let preimage = [0x7u8; 32];
     let hashlock = hashlock_from_preimage(&preimage);
     let hashlock_b = B256::from(hashlock);
@@ -105,7 +105,7 @@ async fn cross_chain_swap_is_correlated_and_preimage_captured() {
         .await
         .unwrap();
 
-    // --- o maestro observa as duas chains ---
+    // --- maestro observes both chains ---
     let mut tracker = SwapTracker::new();
     let head_a = prov_a.get_block_number().await.unwrap();
     let head_b = prov_b.get_block_number().await.unwrap();
@@ -124,10 +124,10 @@ async fn cross_chain_swap_is_correlated_and_preimage_captured() {
     assert_eq!(
         tracker.correlated_hashlocks(),
         vec![hashlock],
-        "o maestro deveria correlacionar as duas pernas pelo hashlock"
+        "maestro should correlate both legs by hashlock"
     );
 
-    // 2) o preimage revelado em B foi capturado
+    // 2) the preimage revealed on B was captured.
     assert_eq!(
         tracker.preimage_for(&hashlock),
         Some(preimage),

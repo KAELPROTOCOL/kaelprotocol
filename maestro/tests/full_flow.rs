@@ -1,9 +1,8 @@
 //!
-//!   1. Dois makers ASSINAM ordens espelhadas (Camada 2) e enviam ao SERVIDOR
-//!      do livro (Camada 3), que VERIFICA na borda e CASA o par.
+//!   1. Two makers sign mirrored orders and send them to the orderbook server,
+//!      which verifies at the boundary and matches the pair.
 //!   2. Wallets settle through HTLCs on two chains.
-//!      em A.
-//!   3. O MAESTRO (Camada 4) observa as duas chains e correlaciona o swap.
+//!   3. Maestro observes both chains and correlates the swap.
 //!
 
 use alloy::network::EthereumWallet;
@@ -21,8 +20,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const CHAIN_A: u64 = 1;
 const CHAIN_B: u64 = 10;
-const TOKEN_X: u8 = 0x11; // ativo na chain A
-const TOKEN_Y: u8 = 0x22; // ativo na chain B
+const TOKEN_X: u8 = 0x11; // asset on chain A
+const TOKEN_Y: u8 = 0x22; // asset on chain B
 const PK_MAKER_A: [u8; 32] = [0xA1; 32];
 const PK_MAKER_B: [u8; 32] = [0xB2; 32];
 
@@ -49,13 +48,13 @@ fn order_json(o: &Order) -> serde_json::Value {
 
 #[tokio::test]
 async fn mvp_orderbook_to_settlement_to_maestro() {
-    // ===== ETAPA 1: descoberta no livro (off-chain) =====
+    // ===== STEP 1: off-chain orderbook discovery =====
     let base = orderbook::server::spawn_ephemeral().await;
 
     let maker_a = address_from_private_key(&PK_MAKER_A);
     let maker_b = address_from_private_key(&PK_MAKER_B);
 
-    // A vende 1 unidade de X (chain A), quer 2000 de Y (chain B)
+    // A sells 1 unit of X on chain A and wants 2000 units of Y on chain B.
     let order_a = Order {
         maker: maker_a,
         sell_token: [TOKEN_X; 20],
@@ -68,7 +67,7 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         nonce: 1,
         created_at: 0,
     };
-    // B espelho: vende 2000 de Y (chain B), quer 1 unidade de X (chain A)
+    // B is the mirror: sells 2000 units of Y on chain B and wants 1 unit of X on chain A.
     let order_b = Order {
         maker: maker_b,
         sell_token: [TOKEN_Y; 20],
@@ -90,20 +89,20 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         &json!({"order": order_json(&order_a), "signature": sig_a}),
     )
     .await;
-    assert_eq!(r.0, 200, "A aceita pela borda: {}", r.1);
+    assert_eq!(r.0, 200, "A should be accepted at the boundary: {}", r.1);
     let r = http_post(
         &format!("{base}/orders"),
         &json!({"order": order_json(&order_b), "signature": sig_b}),
     )
     .await;
-    assert_eq!(r.0, 200, "B aceita pela borda: {}", r.1);
+    assert_eq!(r.0, 200, "B should be accepted at the boundary: {}", r.1);
 
     let m = http_get(&format!("{base}/matches?maker=0x{}", hex::encode(maker_a))).await;
     let pairs: serde_json::Value = serde_json::from_str(&m.1).unwrap();
     assert_eq!(
         pairs.as_array().unwrap().len(),
         1,
-        "o livro deveria informar 1 par"
+        "the orderbook should report 1 pair"
     );
 
     let (_anvil_a, prov_a, wallet_a) = spawn_chain(CHAIN_A).await;
@@ -166,7 +165,7 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         .await
         .unwrap();
 
-    // ===== ETAPA 3: o maestro correlaciona =====
+    // ===== STEP 3: maestro correlates the swap =====
     let mut tracker = SwapTracker::new();
     let head_a = prov_a.get_block_number().await.unwrap();
     let head_b = prov_b.get_block_number().await.unwrap();
@@ -180,18 +179,18 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
     assert_eq!(
         tracker.correlated_hashlocks(),
         vec![hashlock],
-        "swap correlacionado"
+        "swap should be correlated"
     );
     assert_eq!(
         tracker.preimage_for(&hashlock),
         Some(preimage),
-        "preimage capturado"
+        "preimage should be captured"
     );
 
     let s = tracker.get(&hashlock).unwrap();
     assert!(
         s.legs.iter().all(|l| l.redeemed),
-        "ambas as pernas resgatadas"
+        "both legs should be redeemed"
     );
 }
 

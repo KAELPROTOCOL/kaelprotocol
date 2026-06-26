@@ -139,6 +139,7 @@ check_docs_exist() {
     docs/SESSION_WORK_REPORT.md
     docs/AUDITOR_HANDOFF_INDEX.md
     docs/MAINNET_READINESS_GATE.md
+    docs/THIRTY_NODE_MARKET_TESTNET_SIMULATION.md
   )
   local doc
   for doc in "${docs[@]}"; do
@@ -169,6 +170,7 @@ check_doc_sanity() {
     docs/SESSION_WORK_REPORT.md
     docs/AUDITOR_HANDOFF_INDEX.md
     docs/MAINNET_READINESS_GATE.md
+    docs/THIRTY_NODE_MARKET_TESTNET_SIMULATION.md
   )
   local file line lower
   for file in "${docs[@]}"; do
@@ -274,6 +276,7 @@ run_step "Shellcheck" bash -c 'shellcheck scripts/*.sh'
 run_step "Development flow" ./scripts/run_dev_swap_test.sh
 run_step "Closed private testnet" ./scripts/run_closed_testnet_local.sh
 run_step "Full private testnet" ./scripts/run_private_testnet_full.sh
+run_step "30-node market sim quick" bash -c 'KAEL_SIM_NODES=5 KAEL_SIM_WALLETS_PER_NODE=1 KAEL_SIM_DAYS=1 KAEL_SIM_ORDERS_PER_DAY=10 KAEL_SIM_CONCURRENCY=2 ./scripts/run_30node_market_testnet_simulation.sh'
 run_step "Docs" check_docs_exist
 run_step "Documentation sanity" check_doc_sanity
 run_step "Security scan" check_security_strings

@@ -7,6 +7,8 @@ Last updated: 2026-06-26
 | Command | Purpose | Expected Result |
 |---|---|---|
 | `./scripts/run_private_testnet_full.sh` | Full local/private mainnet-like gate | `PRIVATE TESTNET FULL PASS` |
+| `./scripts/run_30node_market_testnet_simulation.sh --quick` | Deterministic logical multi-node market simulation for gate/CI | `VERDICT: PASS` |
+| `./scripts/run_30node_market_testnet_simulation.sh --extended` | Pre-audit logical multi-node market simulation | `VERDICT: PASS` |
 | `./scripts/run_dev_swap_test.sh` | Development contract, primitive, and closed Settlement flow | success marker printed |
 | `./scripts/run_closed_testnet_local.sh` | Local closed Settlement flow | closed swap completed |
 | `cargo fmt --all -- --check` | Rust formatting | pass |
@@ -33,9 +35,14 @@ Last updated: 2026-06-26
 | Invalid HTLC/Settlement/token | preflight, broadcast, private runner failures |
 | Confirmation depth | `exec::confirm`, `chain` tests |
 | Script safety | `shellcheck`, private runner expected failures |
+| 30 logical-node market simulation | `market-testnet-sim`, quick gate profile, extended/full auditor profiles |
+| Price-time orderbook matching | `orderbook` tests, `market-testnet-sim` same-price and best-price checks |
+| Reorg/rollback no-secret-leak | `swapkit` executor test, `market-testnet-sim` reorg metrics |
+| Preflight zero transactions | `swapkit/tests/preflight_no_transactions.rs`, `market-testnet-sim` metrics |
 
 ## Test Counts
 
 - Foundry: 49 tests.
-- Rust workspace: 108 tests.
-- Total: 157 passing tests, 0 ignored.
+- Rust workspace: includes the market simulation integration test.
+- Total count may change as audit simulation coverage is extended; the gate is
+  authoritative.

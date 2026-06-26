@@ -15,6 +15,14 @@ From the repository root:
 ./scripts/run_private_testnet_full.sh
 ```
 
+For the deterministic logical multi-node market simulation:
+
+```bash
+./scripts/run_30node_market_testnet_simulation.sh --quick
+./scripts/run_30node_market_testnet_simulation.sh --extended
+./scripts/run_30node_market_testnet_simulation.sh --full
+```
+
 ## What It Does
 
 - Starts two private local Anvil chains.
@@ -35,6 +43,12 @@ From the repository root:
 - Writes logs to `/tmp/kael-private-testnet-full/`.
 - Cleans up local Anvil processes on exit.
 
+The market simulation additionally models logical nodes, multiple wallets,
+price-time orderbook matching, simultaneous Settlement-mediated native and
+ERC-20 swap outcomes, refunds, reorg/rollback evidence, and preflight
+zero-transaction metrics. It writes audit artifacts to
+`/tmp/kael-30node-market-testnet-simulation/`.
+
 ## Expected Result
 
 ```text
@@ -45,6 +59,7 @@ PRIVATE TESTNET FULL PASS
 
 ```text
 /tmp/kael-private-testnet-full/
+/tmp/kael-30node-market-testnet-simulation/
 ```
 
 ## Failure Handling

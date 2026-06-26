@@ -10,7 +10,7 @@ pub trait SignatureVerifier: Send + Sync {
     fn verify(&self, order: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyError>;
 }
 
-/// Verificador EIP-712 (equivalente ao `Order.sol`).
+/// EIP-712 verifier equivalent to `Order.sol`.
 pub struct Eip712Verifier;
 
 impl SignatureVerifier for Eip712Verifier {

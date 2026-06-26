@@ -21,7 +21,7 @@ pub struct Leg {
     pub refunded: bool,
 }
 
-/// Estado de um swap cross-chain: as pernas observadas + o preimage revelado.
+/// Cross-chain swap state: observed legs plus the revealed preimage.
 #[derive(Default, Clone, Debug)]
 pub struct SwapState {
     pub legs: Vec<Leg>,
@@ -40,7 +40,7 @@ impl SwapState {
     }
 }
 
-/// Rastreador de swaps, indexado por hashlock.
+/// Swap tracker indexed by hashlock.
 #[derive(Default)]
 pub struct SwapTracker {
     swaps: HashMap<[u8; 32], SwapState>,
@@ -130,7 +130,7 @@ impl SwapTracker {
         self.swaps.get(hashlock).and_then(|s| s.preimage)
     }
 
-    /// Swaps correlacionados (as duas pernas observadas em chains distintas).
+    /// Correlated swaps with both legs observed on distinct chains.
     pub fn correlated_hashlocks(&self) -> Vec<[u8; 32]> {
         self.swaps
             .iter()

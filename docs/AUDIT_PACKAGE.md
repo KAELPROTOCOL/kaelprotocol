@@ -32,11 +32,13 @@ In scope:
 - `swapkit/src/exec/*`
 - `swapkit/src/bin/closed-testnet-preflight.rs`
 - `swapkit/src/bin/closed-testnet-swap.rs`
+- `swapkit/src/bin/market-testnet-sim.rs`
 - `scripts/run_dev_swap_test.sh`
 - `scripts/run_closed_testnet_preflight.sh`
 - `scripts/run_closed_testnet_swap.sh`
 - `scripts/run_closed_testnet_local.sh`
 - `scripts/run_private_testnet_full.sh`
+- `scripts/run_30node_market_testnet_simulation.sh`
 - documentation in `docs/`
 
 Out of scope:
@@ -54,6 +56,8 @@ From the repository root:
 
 ```bash
 ./scripts/run_private_testnet_full.sh
+./scripts/run_30node_market_testnet_simulation.sh --quick
+./scripts/run_30node_market_testnet_simulation.sh --extended
 ./scripts/run_dev_swap_test.sh
 ./scripts/run_closed_testnet_local.sh
 cargo fmt --all -- --check
@@ -67,6 +71,7 @@ The main private audit gate writes logs to:
 
 ```text
 /tmp/kael-private-testnet-full/
+/tmp/kael-30node-market-testnet-simulation/
 ```
 
 Expected success marker:
@@ -90,6 +95,7 @@ PRIVATE TESTNET FULL PASS
 - Internal audit report: `docs/INTERNAL_AUDIT_REPORT.md`
 - Findings register: `docs/FINDINGS_REGISTER.md`
 - Risk register: `docs/RISK_REGISTER.md`
+- 30-node market simulation: `docs/THIRTY_NODE_MARKET_TESTNET_SIMULATION.md`
 
 ## Protected Assets
 
@@ -111,6 +117,8 @@ Auditors should specifically assess:
 - Whether preflight and broadcast checks can be bypassed.
 - Whether scripts can accidentally touch mainnet or real funds.
 - Whether local/private assumptions are clearly separated from production gaps.
+- Whether the deterministic market simulation evidence covers realistic
+  multi-node orderbook and Settlement behavior within the private scope.
 
 ## Current Conclusion
 

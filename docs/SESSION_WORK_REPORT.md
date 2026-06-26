@@ -281,6 +281,22 @@ The following remain intentionally deferred and block real mainnet:
 - Real funds: not used.
 - Worktree at final check: clean.
 
+## 30-Node Market Testnet Simulation Addendum
+
+- Added `./scripts/run_30node_market_testnet_simulation.sh`.
+- Added `swapkit/src/bin/market-testnet-sim.rs`.
+- Added `swapkit/tests/market_testnet_simulation.rs`.
+- Added `docs/THIRTY_NODE_MARKET_TESTNET_SIMULATION.md`.
+- Integrated the quick simulation profile into
+  `./scripts/run_mainnet_readiness_gate.sh`.
+- Simulation artifacts are written to
+  `/tmp/kael-30node-market-testnet-simulation/`.
+- The simulator records `summary.md`, `metrics.json`, `nodes.jsonl`,
+  `wallets.jsonl`, `orders.jsonl`, `matches.jsonl`, `swaps.jsonl`,
+  `failures.jsonl`, `reorgs.jsonl`, and `simulation.log`.
+- Cancellation and partial fills remain documented gaps; the simulator does not
+  invent support for unavailable orderbook features.
+
 ## Copy Command
 
 ```bash

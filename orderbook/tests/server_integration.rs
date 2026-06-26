@@ -41,7 +41,7 @@ fn build_order(spec: OrderSpec) -> Order {
         buy_amount: spec.buy_amt,
         valid_until: 4_000_000_000,
         nonce: spec.nonce,
-        created_at: 0, // ignorado no payload assinado
+        created_at: 0, // ignored by the signed payload
     }
 }
 
@@ -60,7 +60,7 @@ fn order_json(o: &Order) -> serde_json::Value {
 }
 
 async fn spawn_server() -> String {
-    // Porta 0 = SO escolhe uma livre; descobrimos qual e devolvemos a base URL.
+    // Port 0 lets the OS choose a free port; return the discovered base URL.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = orderbook::server::build_router(orderbook::server::AppState::new());
@@ -78,7 +78,7 @@ async fn submit_verifies_and_matches_are_reported() {
     let maker_a = maker_address(&PK_A);
     let maker_b = maker_address(&PK_B);
 
-    // A vende 100 de tok 0x11 (chain 1), quer 200 de tok 0x22 (chain 10)
+    // A sells 100 of token 0x11 on chain 1 and wants 200 of token 0x22 on chain 10.
     let a = build_order(OrderSpec {
         maker: maker_a,
         sell_tok: 0x11,
@@ -89,7 +89,7 @@ async fn submit_verifies_and_matches_are_reported() {
         buy_amt: 200,
         nonce: 1,
     });
-    // B espelho: vende 200 de 0x22 (chain 10), quer 100 de 0x11 (chain 1)
+    // B is the mirror: sells 200 of 0x22 on chain 10 and wants 100 of 0x11 on chain 1.
     let b = build_order(OrderSpec {
         maker: maker_b,
         sell_tok: 0x22,
@@ -110,7 +110,7 @@ async fn submit_verifies_and_matches_are_reported() {
             &json!({"order": order_json(&a), "signature": sig_a}),
         )
         .await;
-    assert_eq!(r.0, 200, "A deveria ser aceita: {}", r.1);
+    assert_eq!(r.0, 200, "A should be accepted: {}", r.1);
 
     let bad = client
         .post(
@@ -126,7 +126,7 @@ async fn submit_verifies_and_matches_are_reported() {
             &json!({"order": order_json(&b), "signature": sig_b}),
         )
         .await;
-    assert_eq!(r.0, 200, "B deveria ser aceita: {}", r.1);
+    assert_eq!(r.0, 200, "B should be accepted: {}", r.1);
 
     let m = client
         .get(&format!("{base}/matches?maker=0x{}", hex::encode(maker_a)))

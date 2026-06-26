@@ -1,7 +1,6 @@
 //!
-//! Observa duas chains EVM, decodifica os eventos do HTLC, correlaciona as duas
-//! pernas de um swap pelo MESMO hashlock, extrai o preimage revelado e detecta
-//! timeouts.
+//! Observes two EVM chains, decodes HTLC events, correlates both swap legs by
+//! the same hashlock, extracts the revealed preimage, and detects timeouts.
 //!
 //!
 

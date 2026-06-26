@@ -30,13 +30,13 @@ fn enc_addr(a: &[u8; 20], out: &mut Vec<u8>) {
     out.extend_from_slice(a);
 }
 
-/// abi.encode de um uint256 a partir de um u128 (left-pad para 32 bytes).
+/// ABI-encodes a uint256 from a u128, left-padded to 32 bytes.
 fn enc_u128(v: u128, out: &mut Vec<u8>) {
     out.extend_from_slice(&[0u8; 16]);
     out.extend_from_slice(&v.to_be_bytes());
 }
 
-/// abi.encode de um uint256 a partir de um u64 (left-pad para 32 bytes).
+/// ABI-encodes a uint256 from a u64, left-padded to 32 bytes.
 fn enc_u64(v: u64, out: &mut Vec<u8>) {
     out.extend_from_slice(&[0u8; 24]);
     out.extend_from_slice(&v.to_be_bytes());
@@ -87,9 +87,9 @@ pub fn digest(o: &Order) -> [u8; 32] {
 }
 
 fn address_of(vk: &VerifyingKey) -> [u8; 20] {
-    let point = vk.to_encoded_point(false); // descomprimido: 0x04 ‖ X ‖ Y
+    let point = vk.to_encoded_point(false); // uncompressed: 0x04 || X || Y
     let bytes = point.as_bytes();
-    let hash = keccak(&bytes[1..]); // ignora o prefixo 0x04
+    let hash = keccak(&bytes[1..]); // ignore the 0x04 prefix
     let mut addr = [0u8; 20];
     addr.copy_from_slice(&hash[12..]);
     addr
@@ -103,7 +103,7 @@ pub fn verify(o: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyE
     let s = &signature[32..64];
     let v = signature[64];
 
-    // Endurecimento ECDSA: rejeita s alto (maleabilidade, EIP-2).
+    // ECDSA hardening: reject high-s signatures (malleability, EIP-2).
     if is_high_s(s) {
         return Err(VerifyError::MalleableS);
     }
@@ -277,7 +277,7 @@ mod tests {
         out
     }
 
-    // s alto (maleabilidade): troca s por (n - s) e inverte v; deve dar MalleableS.
+    // High-s malleability: replace s with (n - s) and flip v; must return MalleableS.
     #[test]
     fn high_s_rejected() {
         let o = vector_order();
@@ -288,8 +288,8 @@ mod tests {
 
         let mut sig = Vec::with_capacity(65);
         sig.extend_from_slice(&base[0..32]); // r
-        sig.extend_from_slice(&high_s); // s alto
-        sig.push(if base[64] == 27 { 28 } else { 27 }); // v invertido
+        sig.extend_from_slice(&high_s); // high s
+        sig.push(if base[64] == 27 { 28 } else { 27 }); // flipped v
 
         assert_eq!(
             verify(&o, &sig, 1_000_000_000),

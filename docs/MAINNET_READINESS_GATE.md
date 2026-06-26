@@ -37,6 +37,7 @@ Logs are written to:
 - Development swap flow.
 - Closed local/private Settlement swap flow.
 - Full private mainnet-like testnet flow.
+- Quick deterministic 30-node market simulation profile.
 - Required audit documentation exists.
 - Documentation does not claim production or real-fund readiness.
 - Critical security strings and unsafe script patterns are absent.
@@ -82,6 +83,8 @@ On failure, the script prints the failing step and the tail of the step log.
 - Rust formatting failure: run `cargo fmt --all` and review the diff.
 - Clippy failure: fix the warning instead of suppressing it.
 - Private testnet failure: inspect `/tmp/kael-private-testnet-full`.
+- Market simulation failure: inspect
+  `/tmp/kael-30node-market-testnet-simulation/summary.md` and `metrics.json`.
 - Documentation sanity failure: qualify any readiness statement as not
   production/mainnet ready unless external audit has completed.
 
