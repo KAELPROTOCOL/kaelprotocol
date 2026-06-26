@@ -50,11 +50,11 @@ pub fn best_match_for(taker: &Order, makers: &[Order], now: u64) -> Option<usize
     best
 }
 
-/// Ordem total price-time entre candidatos a maker, do ponto de vista do taker,
+/// Total price-time ordering among maker candidates from the taker's view.
 pub fn cmp_makers_for_taker(a: &Order, b: &Order) -> std::cmp::Ordering {
     b.sell_amount
         .cmp(&a.sell_amount) // larger sell_amount first
-        .then_with(|| a.created_at.cmp(&b.created_at)) // mais antigo primeiro
+        .then_with(|| a.created_at.cmp(&b.created_at)) // older first
         .then_with(|| a.nonce.cmp(&b.nonce)) // lower nonce first
 }
 
@@ -190,9 +190,9 @@ mod tests {
     #[test]
     fn price_tie_breaks_by_oldest() {
         let taker = order_a(100, 200, 1000, 1, 0);
-        let m_new = order_b(200, 100, 1000, 50, 1); // chegou depois
+        let m_new = order_b(200, 100, 1000, 50, 1); // arrived later
         let m_old = order_b(200, 100, 1000, 10, 2); // same price, older
         let makers = vec![m_new, m_old];
-        assert_eq!(best_match_for(&taker, &makers, 500), Some(1)); // o antigo
+        assert_eq!(best_match_for(&taker, &makers, 500), Some(1)); // the older order
     }
 }

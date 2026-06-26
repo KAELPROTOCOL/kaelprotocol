@@ -165,7 +165,7 @@ mod tests {
     // mapeamento + as duas sutilezas: expected_amount = sell da cp (melhora de
     #[test]
     fn derives_context_with_price_improvement_and_recipients() {
-        let a = order_a(10); // A = Maker (mais antigo)
+        let a = order_a(10); // A = Maker, older order
         let b = ord(0xBB, 2, Y, 10, 600, X, 1, 1000, 20);
         let role = assign_role(&a, &b);
         assert_eq!(role, Role::Maker);

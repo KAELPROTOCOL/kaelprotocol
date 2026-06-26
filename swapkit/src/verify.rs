@@ -290,7 +290,7 @@ mod tests {
         );
     }
 
-    // ---- gap de timelock: GapTooSmall por papel ----
+    // ---- timelock gap: GapTooSmall by role ----
 
     #[test]
     fn gap_too_small_maker() {
@@ -312,7 +312,7 @@ mod tests {
         );
     }
 
-    // ---- gap de timelock: Inverted (lado errado) por papel ----
+    // ---- timelock gap: Inverted, wrong side by role ----
 
     #[test]
     fn inverted_maker() {
@@ -354,7 +354,7 @@ mod tests {
         );
     }
 
-    // embora com gap inter-pernas correto, expira perto demais de `now`. Sem
+    // Even with a correct inter-leg gap, it expires too close to `now`.
     #[test]
     fn taker_unsafe_when_counterparty_expires_too_soon() {
         let mut e = taker_exp();
@@ -380,7 +380,7 @@ mod tests {
     fn maker_unsafe_when_counterparty_expires_too_soon() {
         let mut e = maker_exp();
         let mut o = obs_for_maker();
-        o.timelock = 5000; // bem do lado certo (>> my=1000+gap)
+        o.timelock = 5000; // safely on the correct side (>> my=1000+gap)
         e.now = 4950; // but 5000 < 4950 + 100: no clock window
         assert_eq!(
             verify_counterparty_leg(&e, &o),

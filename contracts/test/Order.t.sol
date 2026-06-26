@@ -100,7 +100,7 @@ contract OrderTest is Test {
     }
 
 
-    // v fora de {27,28} => InvalidV. (s baixo, passa o check de maleabilidade.)
+    // v outside {27,28} => InvalidV. Low s passes the malleability check.
     function test_InvalidV_Reverts() public {
         OrderLib.Order memory o = _order();
         (, bytes32 r, bytes32 s) = vm.sign(makerPk, h.hash(o));

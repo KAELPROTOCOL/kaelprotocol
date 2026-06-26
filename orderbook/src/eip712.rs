@@ -326,7 +326,7 @@ mod tests {
         sig.push(27);
 
         let result = verify(&o, &sig, 1_000_000_000);
-        assert!(result.is_err(), "r=0 deve ser rejeitado, veio: {result:?}");
+        assert!(result.is_err(), "r=0 must be rejected, got: {result:?}");
         assert_eq!(result, Err(VerifyError::BadSignature));
     }
 }

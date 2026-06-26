@@ -179,13 +179,13 @@ mod tests {
 
         let observed = match obs.observe(&hashlock, 1).await.unwrap() {
             LockObservation::Confirmed(o) => o,
-            other => panic!("esperava Confirmed, veio {other:?}"),
+            other => panic!("expected Confirmed, got {other:?}"),
         };
         assert_eq!(observed.hashlock, hashlock);
         assert_eq!(observed.amount, amount);
         assert_eq!(observed.recipient, me);
 
-        let discovered = obs.discover_contract_id(&hashlock).expect("descoberto");
+        let discovered = obs.discover_contract_id(&hashlock).expect("discovered");
         assert_eq!(
             discovered, expected_cid.0,
             "contractId discovered by hashlock is the real lock (discovery == verification)"

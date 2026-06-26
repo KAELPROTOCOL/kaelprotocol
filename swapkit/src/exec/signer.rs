@@ -1,6 +1,6 @@
 //!
-//! Sem keystore cifrado, sem senha, sem HSM/KMS, sem hardware wallet, sem
-//! fora do MVP.
+//! No encrypted keystore, password flow, HSM/KMS, or hardware wallet exists in
+//! the MVP.
 //!
 
 use crate::verify::Address;
@@ -10,7 +10,7 @@ use alloy::signers::local::PrivateKeySigner;
 
 pub const ENV_KEY: &str = "KAEL_SIGNER_KEY";
 
-/// Chain-ids de TESTE explicitamente liberados (allowlist, safe-by-default).
+/// Explicitly allowed test chain IDs.
 ///
 pub const ALLOWED_TEST_CHAINS: &[u64] = &[
     31337,    // anvil / hardhat (default)
@@ -98,7 +98,7 @@ impl Signer {
         self.address
     }
 
-    /// A chain liberada onde este assinante opera.
+    /// The allowed chain where this signer operates.
     pub fn chain_id(&self) -> u64 {
         self.chain_id
     }
@@ -108,7 +108,7 @@ impl Signer {
     }
 }
 
-/// sem rede.
+/// Pure allowlist check, with no network access.
 pub fn assert_chain_allowed(chain_id: u64) -> Result<(), SignerError> {
     if ALLOWED_TEST_CHAINS.contains(&chain_id) {
         Ok(())
@@ -131,7 +131,7 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
-    // ---------------- o GUARD, puro (sem rede) ----------------
+    // ---------------- pure guard, no network ----------------
 
     #[test]
     fn allowlist_admits_known_test_chains() {
@@ -146,7 +146,7 @@ mod tests {
             assert_eq!(
                 assert_chain_allowed(id),
                 Err(SignerError::MainnetForbidden { chain_id: id }),
-                "chain-id {id} jamais pode passar"
+                "chain-id {id} must never pass"
             );
         }
         assert_eq!(
@@ -160,13 +160,13 @@ mod tests {
         let r = Signer::from_key_str("not-hex", "http://127.0.0.1:1").await;
         assert!(
             matches!(r.as_ref().err(), Some(SignerError::BadKey(_))),
-            "esperava BadKey, veio outra coisa"
+            "expected BadKey, got another result"
         );
     }
 
     #[tokio::test]
     async fn from_key_str_ok_on_allowed_chain() {
-        let anvil = Anvil::new().spawn(); // chain-id default = 31337 (na allowlist)
+        let anvil = Anvil::new().spawn(); // default chain-id = 31337, in the allowlist
         let s = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint())
             .await
             .expect("31337 is in the allowlist: should build");

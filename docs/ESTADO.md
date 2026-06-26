@@ -13,7 +13,7 @@
 
 ## 1. Built And Tested
 
-**Total: 155 passing tests, 0 ignored** (49 Foundry + 106 Rust).
+**Total: 157 passing tests, 0 ignored** (49 Foundry + 108 Rust).
 
 ### Contracts (Foundry) - 49 tests
 
@@ -39,7 +39,7 @@
   expiry watchdog.
 - `full_flow` (1): capstone orderbook to settlement to maestro flow.
 
-### `swapkit` (Rust) - 71 tests, 0 ignored
+### `swapkit` (Rust) - 73 tests, 0 ignored
 
 - `verify` (19): counterparty-leg verification for hashlock, token, amount,
   recipient, asymmetric role timelock gap, and the absolute `now + min_gap`
@@ -50,11 +50,14 @@
   anvil integration.
 - `handshake` (5): deterministic Taker/Maker role assignment and pure
   `SwapContext` derivation.
-- `exec` (21): signer allowlist, `lock`/`redeem`/`refund` sends, hashlock
+- `exec` (22): signer allowlist, `lock`/`redeem`/`refund` sends, hashlock
   observation, confirmation depth, injected clock, and anti-TOCTOU re-checks.
   Includes a direct HTLC local e2e over two anvils; the closed local runner now
   locks/refunds through `Settlement` while observing and redeeming through the
   canonical HTLC, including an ERC-20 Settlement lock with exact allowance.
+- `preflight_no_transactions` (1): proves the closed-testnet preflight binary
+  sends zero transactions by checking block and transaction counters before and
+  after execution.
 - `mainnet_readiness_properties` (5): property-style coverage for verifier
   single-field mutation rejection, no secret reveal against unsafe legs, no maker
   lock against unsafe legs, complementary handshake role assignment, and redacted
@@ -114,7 +117,7 @@
 Foundry  : 49 tests  (HashedTimelock 12, Order 10, Settlement 22, Vector 1, Fuzz 4)
 orderbook: 26 tests  (lib 25 + integration 1)
 maestro  :  9 tests  (lib 6 + e2e 2 + full_flow 1)
-swapkit  : 71 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 21 + properties 5, incl. real anvil)
+swapkit  : 73 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 22 + properties 5 + preflight 1, incl. real anvil)
 ---------------------------------------------------------------
-TOTAL    : 155 passing, 0 ignored
+TOTAL    : 157 passing, 0 ignored
 ```

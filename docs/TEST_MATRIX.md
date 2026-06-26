@@ -11,7 +11,7 @@ Last updated: 2026-06-26
 | `./scripts/run_closed_testnet_local.sh` | Local closed Settlement flow | closed swap completed |
 | `cargo fmt --all -- --check` | Rust formatting | pass |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Rust lint gate | pass |
-| `cargo test --workspace` | Rust unit/integration/property tests | 106 Rust tests pass |
+| `cargo test --workspace` | Rust unit/integration/property tests | 108 Rust tests pass |
 | `cd contracts && forge test && cd ..` | Solidity unit/fuzz tests | 49 Foundry tests pass |
 | `shellcheck scripts/*.sh` | shell static analysis | pass |
 
@@ -37,5 +37,5 @@ Last updated: 2026-06-26
 ## Test Counts
 
 - Foundry: 49 tests.
-- Rust workspace: 106 tests.
-- Total: 155 passing tests, 0 ignored.
+- Rust workspace: 108 tests.
+- Total: 157 passing tests, 0 ignored.

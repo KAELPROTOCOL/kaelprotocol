@@ -620,6 +620,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reorg_rollback_removes_confirmed_counterparty_leg_without_secret_leak() {
+        let anvil_a = Anvil::new().spawn();
+        let anvil_b = Anvil::new().spawn();
+        let rpc_a = anvil_a.endpoint();
+        let rpc_b = anvil_b.endpoint();
+
+        let (htlc_a, chain_a) = deploy_htlc(&rpc_a, ANVIL_KEY0).await;
+        let (htlc_b, chain_b) = deploy_htlc(&rpc_b, ANVIL_KEY1).await;
+
+        let taker_a = Signer::from_key_str(ANVIL_KEY0, &rpc_a).await.unwrap();
+        let maker_b = Signer::from_key_str(ANVIL_KEY1, &rpc_b).await.unwrap();
+        let now = SystemClock.now();
+        let clock = FakeClock::new(now);
+        let secret = [0x33u8; 32];
+        let hashlock = hashlock_from_preimage(&secret);
+
+        let taker_ctx = ctx(
+            Role::Taker,
+            taker_a.address(),
+            maker_b.address(),
+            Some(secret),
+            hashlock,
+            now,
+        );
+        let mut taker_exec = executor(ExecutorFixture {
+            state: SwapState::SecretGenerated,
+            ctx: taker_ctx,
+            own_key: ANVIL_KEY0,
+            cp_key: ANVIL_KEY1,
+            own_rpc: &rpc_a,
+            cp_rpc: &rpc_b,
+            own_htlc: htlc_a,
+            cp_htlc: htlc_b,
+            own_chain_id: chain_a,
+            cp_chain_id: chain_b,
+            clock: clock.clone(),
+        })
+        .await;
+
+        assert!(matches!(
+            taker_exec.step().await.unwrap(),
+            StepOutcome::LockedMyLeg { .. }
+        ));
+        assert_eq!(taker_exec.state, SwapState::MyLegLocked);
+
+        let snapshot: String = maker_b
+            .provider()
+            .raw_request("evm_snapshot".into(), ())
+            .await
+            .unwrap();
+        let maker_lock = tx::lock(
+            &maker_b,
+            htlc_b,
+            taker_a.address(),
+            zero(),
+            500,
+            hashlock,
+            now + 3_600,
+        )
+        .await
+        .unwrap();
+
+        let verifier_b = RpcVerifier::new(&rpc_b).unwrap();
+        assert!(matches!(
+            verifier_b
+                .observe_lock(htlc_b, maker_lock.contract_id, 1)
+                .await
+                .unwrap(),
+            LockObservation::Confirmed(_)
+        ));
+
+        let reverted: bool = maker_b
+            .provider()
+            .raw_request("evm_revert".into(), (snapshot,))
+            .await
+            .unwrap();
+        assert!(reverted, "anvil rollback must succeed");
+        assert_eq!(
+            verifier_b
+                .observe_lock(htlc_b, maker_lock.contract_id, 1)
+                .await
+                .unwrap(),
+            LockObservation::Absent,
+            "the previously confirmed counterparty lock disappears after rollback"
+        );
+
+        assert_eq!(taker_exec.step().await.unwrap(), StepOutcome::Waiting);
+        assert_eq!(taker_exec.state, SwapState::MyLegLocked);
+        assert_eq!(taker_exec.ctx.revealed_secret, None);
+        assert_eq!(taker_exec.counterparty_contract_id(), None);
+
+        clock.set(now + 7_201);
+        let _: serde_json::Value = taker_exec
+            .own_signer
+            .provider()
+            .raw_request("evm_setNextBlockTimestamp".into(), (now + 7_201,))
+            .await
+            .unwrap();
+        let _: serde_json::Value = taker_exec
+            .own_signer
+            .provider()
+            .raw_request("evm_mine".into(), ())
+            .await
+            .unwrap();
+
+        assert_eq!(taker_exec.step().await.unwrap(), StepOutcome::RefundedMyLeg);
+        assert_eq!(taker_exec.state, SwapState::Refunded);
+
+        let own_id = taker_exec.own_contract_id().unwrap();
+        let verifier_a = RpcVerifier::new(&rpc_a).unwrap();
+        assert_eq!(
+            verifier_a.observe_lock(htlc_a, own_id, 1).await.unwrap(),
+            LockObservation::Absent,
+            "after expiry the taker refunds instead of redeeming the rolled-back leg"
+        );
+    }
+
+    #[tokio::test]
     async fn fake_clock_expiry_drives_refund_without_real_sleep() {
         let anvil_a = Anvil::new().spawn();
         let anvil_b = Anvil::new().spawn();

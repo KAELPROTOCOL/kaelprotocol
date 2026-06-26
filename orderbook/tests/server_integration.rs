@@ -136,7 +136,7 @@ async fn submit_verifies_and_matches_are_reported() {
     assert_eq!(
         pairs.as_array().unwrap().len(),
         1,
-        "esperava 1 par, veio: {}",
+        "expected 1 pair, got: {}",
         m.1
     );
 }

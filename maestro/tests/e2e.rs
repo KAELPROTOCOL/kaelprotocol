@@ -116,11 +116,11 @@ async fn cross_chain_swap_is_correlated_and_preimage_captured() {
         .await
         .unwrap();
 
-    // A teve 1 evento (newSwap); B teve 2 (newSwap + redeem)
-    assert_eq!(n_a, 1, "esperava 1 evento na chain A");
-    assert_eq!(n_b, 2, "esperava 2 eventos na chain B");
+    // A had 1 event (newSwap); B had 2 (newSwap + redeem).
+    assert_eq!(n_a, 1, "expected 1 event on chain A");
+    assert_eq!(n_b, 2, "expected 2 events on chain B");
 
-    // 1) as duas pernas correlacionadas pelo hashlock
+    // 1) both legs are correlated by hashlock.
     assert_eq!(
         tracker.correlated_hashlocks(),
         vec![hashlock],

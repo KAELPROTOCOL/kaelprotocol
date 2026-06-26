@@ -1,10 +1,10 @@
 //!
-//! substituir o RPC depois, SEM reescrever a carteira.
+//! The RPC reader can be replaced later without rewriting the wallet.
 //!
 
 use crate::verify::{Address, ObservedLock};
 
-/// Erros ao ler a chain.
+/// Errors while reading chain state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChainError {
     BadUrl(String),
@@ -42,14 +42,12 @@ impl LockObservation {
     }
 }
 
-/// consome.
-///
 #[allow(async_fn_in_trait)]
 pub trait ChainVerifier {
-    /// exigindo `min_confirmations` de PROFUNDIDADE (anti-reorg).
+    /// Requires `min_confirmations` depth before returning a confirmed lock.
     ///
-    /// antigo (profundidade 0); `min_confirmations = 0` aceita qualquer coisa
-    /// ativa. Erros de leitura viram [`ChainError`].
+    /// `min_confirmations = 0` accepts any active lock. Read failures become
+    /// [`ChainError`].
     async fn observe_lock(
         &self,
         htlc_address: Address,
@@ -95,7 +93,7 @@ use alloy::rpc::types::Filter;
 use alloy::sol;
 use alloy::sol_types::SolEvent;
 
-// que filtra o log certo.
+// Binding used to filter the relevant lock event.
 sol! {
     #[sol(rpc)]
     interface IHashedTimelock {
@@ -122,8 +120,7 @@ sol! {
     }
 }
 
-/// Leitor de chain via RPC EVM (alloy).
-///
+/// EVM chain reader backed by an RPC endpoint.
 pub struct RpcVerifier {
     provider: DynProvider,
 }
@@ -417,13 +414,13 @@ mod tests {
             .await
             .unwrap();
 
-        // === LEITURA REAL via RpcVerifier (o que o #[ignore] nunca provava) ===
+        // Real RpcVerifier read against a live local chain.
         let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
         let htlc_addr: Address = (*htlc.address()).into_array();
-        // Confirmed (equivalente ao comportamento antigo de profundidade 0).
+        // Confirmed: compatible with the old zero-depth behavior.
         let obs = match v.observe_lock(htlc_addr, cid.0, 1).await.unwrap() {
             LockObservation::Confirmed(o) => o,
-            other => panic!("esperava Confirmed da chain real, veio {other:?}"),
+            other => panic!("expected Confirmed from the real chain, got {other:?}"),
         };
 
         assert!(obs.exists, "active lock read from the real chain");
@@ -466,7 +463,7 @@ mod tests {
         assert_eq!(
             next_action(&SwapState::MyLegLocked, &ctx),
             NextAction::RedeemCounterpartyLeg { secret: preimage },
-            "a leitura real, verificada Safe, leva o taker a resgatar"
+            "the real Safe-verified read drives the taker to redeem"
         );
 
         let absent = v.observe_lock(htlc_addr, [0xFFu8; 32], 1).await.unwrap();
@@ -475,7 +472,7 @@ mod tests {
             LockObservation::Absent,
             "nonexistent lock -> Absent"
         );
-        // (que um ObservedLock inexistente verifica como LockNotFound continua
+        // A nonexistent observed lock still verifies as LockNotFound.
         assert_eq!(absent.for_gate(), None);
     }
 
