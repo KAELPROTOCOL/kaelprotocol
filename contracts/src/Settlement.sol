@@ -3,8 +3,7 @@ pragma solidity ^0.8.20;
 
 import {OrderLib} from "./Order.sol";
 
-/// @notice Interface mínima do HashedTimelock — declarada para CHAMÁ-LO.
-///         O HashedTimelock.sol NÃO é alterado em nenhuma linha.
+/// @notice Minimal HashedTimelock interface used for calls.
 interface IHashedTimelock {
     function newSwap(address recipient, address token, uint256 amount, bytes32 hashlock, uint256 timelock)
         external
@@ -13,35 +12,37 @@ interface IHashedTimelock {
     function refund(bytes32 contractId) external;
 }
 
-/// @notice Interface ERC-20 mínima.
+/// @notice Minimal ERC-20 interface.
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
     function approve(address spender, uint256 amount) external returns (bool);
 }
 
-/// @title Settlement — liquidador do Kael (Abordagem A)
-/// @notice Liga a Order assinada (OrderLib) à trava de fundos no HashedTimelock,
-///         de forma atômica e NÃO-CUSTODIAL, validando APENAS a própria perna.
-/// @dev    ARQUITETURA (Abordagem A — decidida): a validação cross-leg (mesmo
-///         hashlock entre as pernas, gap de timelock seguro) NÃO é feita on-chain.
-///         Ela é (a) inoperante cross-chain — cada Settlement é per-chain e só vê
-///         a própria perna — e (b) desnecessária: a segurança vem da falha-segura
-///         do HTLC + a CARTEIRA verificar a perna oposta on-chain ANTES de travar
-///         a sua. Este contrato faz só o que é LOCAL e real:
-///           - liga a ordem assinada à trava (token/amount autorizados) — Furo 1;
-///           - confina a ordem à sua chain (sellChainId == block.chainid);
-///           - anti-replay per-chain por (maker, nonce) — Furo 2;
-///           - não-custódia: duas saídas de fundos só, HTLC ou refundLeg→maker.
-///         Sem dono, sem saque, sem selfdestruct, sem chamada arbitrária.
+/// @title Settlement - Kael settlement contract (Approach A)
+/// @notice Binds a signed Order (OrderLib) to a HashedTimelock fund lock,
+///         atomically and non-custodially, validating only the local leg.
+/// @dev    ARCHITECTURE (chosen Approach A): cross-leg validation (same
+///         hashlock across legs, safe timelock gap) is not done on-chain. It is
+///         (a) not workable cross-chain because each Settlement is per-chain and
+///         sees only its local leg, and (b) unnecessary for safety: security
+///         comes from HTLC fail-safety plus the wallet verifying the opposite
+///         leg on-chain before locking its own. This contract only performs
+///         local, real checks:
+///           - binds the signed order to the lock (authorized token/amount);
+///           - confines the order to its chain (sellChainId == block.chainid);
+///           - provides per-chain anti-replay by (maker, nonce);
+///           - remains non-custodial: funds can exit only to HTLC or refundLeg.
+///         No owner, no privileged withdrawal, no selfdestruct, no arbitrary call.
 contract Settlement {
-    // ---- imutáveis ----
+    // ---- immutables ----
 
-    /// O ÚNICO HashedTimelock que este Settlement usa, FIXADO NO DEPLOY. Deixou
-    /// de ser parâmetro de chamada: fecha o footgun de um `htlc` arbitrário/maligno
-    /// passado pelo chamador — antes, o contrato fazia transferFrom dos fundos do
-    /// maker para si e então `approve`/`newSwap` num endereço não-confiável fornecido
-    /// na própria chamada. Agora a trava só pode ir ao HTLC canônico desta chain.
+    /// The only HashedTimelock this Settlement uses, fixed at deployment.
+    /// The HTLC is no longer a call parameter, closing the footgun where a
+    /// caller could pass an arbitrary or malicious `htlc`. Before that, the
+    /// contract pulled maker funds into itself and then approved/newSwap'd an
+    /// untrusted caller-provided address. Now the lock can only go to this
+    /// chain's canonical HTLC.
     address public immutable htlc;
 
     constructor(address htlc_) {
@@ -49,23 +50,23 @@ contract Settlement {
         htlc = htlc_;
     }
 
-    // ---- estado ----
+    // ---- state ----
 
-    /// maker → nonce → consumido. Anti-replay per-chain por (maker, nonce).
+    /// maker -> nonce -> consumed. Per-chain anti-replay by (maker, nonce).
     mapping(address => mapping(uint256 => bool)) public consumedNonce;
 
-    /// Registro por trava (contractId no HTLC) para o reembolso.
+    /// Refund record keyed by HTLC contractId.
     struct Leg {
-        address maker; // dono real dos fundos — para quem o reembolso SEMPRE vai
+        address maker; // true fund owner; refund ALWAYS goes here
         address token; // address(0) = ETH
         uint256 amount;
-        bool refunded; // guarda de reembolso no nível do Settlement
+        bool refunded; // Settlement-level refund guard
     }
 
-    /// contractId → perna.
+    /// contractId -> leg.
     mapping(bytes32 => Leg) public legs;
 
-    // ---- eventos ----
+    // ---- events ----
 
     event LegAuthorized(bytes32 indexed orderHash, address indexed maker, uint256 nonce);
     event SwapLegSettled(
@@ -77,7 +78,7 @@ contract Settlement {
     );
     event LegRefunded(bytes32 indexed contractId, address indexed maker, uint256 amount);
 
-    // ---- erros ----
+    // ---- errors ----
 
     error ZeroHtlc();
     error NonceAlreadyUsed();
@@ -88,13 +89,14 @@ contract Settlement {
     error ContractIdMismatch();
     error UnknownLeg();
     error AlreadyRefunded();
+    error InvalidToken();
     error TokenTransferFailed();
     error TokenApproveFailed();
     error EthTransferFailed();
 
-    // ---- autorização pura (sem travar) ----
+    // ---- pure authorization without locking ----
 
-    /// @notice Verifica a ordem assinada e consome o nonce do maker (sem travar).
+    /// @notice Verifies the signed order and consumes the maker nonce without locking.
     function authorizeLeg(OrderLib.Order calldata order, bytes calldata signature, uint256 nowTs) external {
         bytes32 orderHash = OrderLib.verify(order, signature, nowTs);
         if (consumedNonce[order.maker][order.nonce]) revert NonceAlreadyUsed();
@@ -102,25 +104,24 @@ contract Settlement {
         emit LegAuthorized(orderHash, order.maker, order.nonce);
     }
 
-    // ---- liquidação atômica de UMA perna ----
+    // ---- atomic settlement of one leg ----
 
-    /// @notice Verifica a ordem, confina-a à chain, consome o nonce, recebe os
-    ///         fundos autorizados e os trava no HTLC a favor de `recipient`.
-    /// @dev VALIDA APENAS A PRÓPRIA PERNA. A correspondência entre as duas pernas
-    ///      (mesmo hashlock, gap de timelock seguro, identidade da contraparte) é
-    ///      responsabilidade da CARTEIRA, que lê a perna oposta on-chain antes de
-    ///      travar a sua (Abordagem A). O `recipient` (quem poderá resgatar) é
-    ///      fornecido por quem trava — a carteira sabe quem é a contraparte do match.
-    ///      O binding ordem↔trava é LOCAL: a trava usa `order.sellToken` e
-    ///      `order.sellAmount` (valores AUTORIZADOS pela assinatura), nunca valores
-    ///      avulsos.
-    /// @param order a ordem desta perna (perna de venda), assinada pelo maker
-    /// @param signature assinatura EIP-712 do `order`
-    /// @param recipient quem poderá resgatar com o preimage (a contraparte do match)
-    /// @param hashlock hashlock SHA-256 acordado off-chain (a carteira garante o mesmo nas duas pernas)
-    /// @param timelock timelock desta perna (a carteira garante a assimetria segura)
-    /// @dev O HTLC é o canônico imutável (`htlc`), fixado no deploy — NÃO é mais
-    ///      parâmetro. A trava nunca pode ir a um endereço fornecido na chamada.
+    /// @notice Verifies the order, confines it to this chain, consumes the nonce,
+    ///         receives authorized funds, and locks them in the HTLC for `recipient`.
+    /// @dev VALIDATES ONLY THE LOCAL LEG. Matching both legs (same hashlock, safe
+    ///      timelock gap, counterparty identity) is the wallet's responsibility.
+    ///      The wallet reads the opposite leg on-chain before locking its own
+    ///      funds (Approach A). `recipient` is supplied by the locker because the
+    ///      wallet knows the match counterparty. The order-to-lock binding is
+    ///      local: the lock uses `order.sellToken` and `order.sellAmount`
+    ///      authorized by the signature, never ad hoc values.
+    /// @param order this leg's sell order, signed by the maker
+    /// @param signature EIP-712 signature over `order`
+    /// @param recipient party that can redeem with the preimage
+    /// @param hashlock SHA-256 hashlock agreed off-chain
+    /// @param timelock this leg's timelock
+    /// @dev The HTLC is immutable and canonical (`htlc`), fixed at deployment.
+    ///      The lock can never go to a caller-provided address.
     function settleLeg(
         OrderLib.Order calldata order,
         bytes calldata signature,
@@ -128,43 +129,41 @@ contract Settlement {
         bytes32 hashlock,
         uint256 timelock
     ) external payable returns (bytes32 contractId) {
-        // a) verifica assinatura + validade desta ordem (reverte se inválida/expirada)
+        // a) Verify this order's signature and validity.
         OrderLib.verify(order, signature, block.timestamp);
 
-        // b) BINDING DE CHAIN: a ordem é para ESTA chain. Confina cada ordem à sua
-        //    chain e torna o anti-replay per-chain suficiente.
+        // b) CHAIN BINDING: the order is for this chain.
         if (order.sellChainId != block.chainid) revert WrongChain();
 
-        // b2) SÓ O MAKER LIQUIDA A PRÓPRIA PERNA (Abordagem A: cada parte trava os
-        //     PRÓPRIOS fundos). Fecha o vetor onde um terceiro, vendo a ordem
-        //     assinada + a aprovação ERC-20 do maker, liquidaria em nome dele com
-        //     recipient/hashlock do atacante e drenaria os tokens do maker.
-        //     Posicionado ANTES de receber qualquer fundo.
+        // b2) Only the maker settles their own leg. This closes the vector where
+        //     a third party observes a signed order plus maker ERC-20 approval
+        //     and settles on the maker's behalf with attacker-controlled
+        //     recipient/hashlock. This check is before receiving any funds.
         if (msg.sender != order.maker) revert NotOrderMaker();
 
-        // c) anti-replay: consome o nonce desta perna
+        // c) Anti-replay: consume this leg's nonce.
         if (consumedNonce[order.maker][order.nonce]) revert NonceAlreadyUsed();
         consumedNonce[order.maker][order.nonce] = true;
 
-        // d) BINDING ORDEM↔TRAVA (local): token/amount vêm da ordem ASSINADA.
-        //    O contractId previsto usa o sender (este contrato) e os valores autorizados.
+        // d) Local order-to-lock binding: token/amount come from the signed order.
         contractId =
             keccak256(abi.encode(address(this), recipient, order.sellToken, order.sellAmount, hashlock, timelock));
 
-        // e) REGISTRO para reembolso (antes de qualquer interação externa — CEI).
+        // e) Refund record before external interactions (CEI).
         legs[contractId] =
             Leg({maker: order.maker, token: order.sellToken, amount: order.sellAmount, refunded: false});
 
-        // f-g) recebe os fundos autorizados e trava no HTLC canônico, em nome próprio
+        // f-g) Receive authorized funds and lock them in the canonical HTLC.
         _receiveAndLock(order, recipient, hashlock, timelock, contractId);
 
-        // h) evento
+        // h) Event.
         emit SwapLegSettled(contractId, order.maker, recipient, hashlock, timelock);
     }
 
-    /// @dev Recebe os fundos desta perna e os trava no HTLC, em nome próprio.
-    ///      Exige que o contractId resultante seja o previsto (defensivo). Esta é
-    ///      UMA das duas únicas saídas de fundos do contrato (a outra é refundLeg).
+    /// @dev Receives this leg's funds and locks them in the HTLC under this
+    ///      contract. Requires the resulting contractId to match the expected one
+    ///      defensively. This is one of only two fund exit paths; the other is
+    ///      refundLeg.
     function _receiveAndLock(
         OrderLib.Order calldata order,
         address recipient,
@@ -174,14 +173,15 @@ contract Settlement {
     ) private {
         bytes32 got;
         if (order.sellToken == address(0)) {
-            // ETH: o value recebido vira a trava.
+            // ETH: the received value becomes the lock.
             if (msg.value != order.sellAmount) revert EthValueMismatch();
             got = IHashedTimelock(htlc).newSwap{value: order.sellAmount}(
                 recipient, order.sellToken, order.sellAmount, hashlock, timelock
             );
         } else {
-            // ERC-20: puxa do maker e aprova o HTLC a sacar exatamente o amount.
+            // ERC-20: pull from the maker and approve the HTLC for exactly amount.
             if (msg.value != 0) revert EthNotAllowedForToken();
+            if (order.sellToken.code.length == 0) revert InvalidToken();
             _safeTransferFrom(order.sellToken, order.maker, address(this), order.sellAmount);
             _safeApprove(order.sellToken, htlc, order.sellAmount);
             got = IHashedTimelock(htlc).newSwap(recipient, order.sellToken, order.sellAmount, hashlock, timelock);
@@ -189,28 +189,28 @@ contract Settlement {
         if (got != contractId) revert ContractIdMismatch();
     }
 
-    /// @notice Reembolsa uma perna após a expiração do timelock no HTLC.
-    /// @dev Qualquer um pode chamar, mas os fundos vão SEMPRE para `leg.maker`
-    ///      (o dono real). Não há como desviar o destino, e o maker nunca fica
-    ///      preso se não puder/quiser enviar a tx ele mesmo. Reverte se a perna já
-    ///      foi resgatada (o próprio HTLC reverte) ou já reembolsada.
+    /// @notice Refunds a leg after the HTLC timelock expires.
+    /// @dev Anyone may call, but funds ALWAYS go to `leg.maker`, the true owner.
+    ///      The destination cannot be redirected, and the maker is not stuck if
+    ///      they cannot or do not want to send the transaction themselves.
+    ///      Reverts if the leg was already redeemed or already refunded.
     function refundLeg(bytes32 contractId) external {
         Leg storage leg = legs[contractId];
         if (leg.maker == address(0)) revert UnknownLeg();
         if (leg.refunded) revert AlreadyRefunded();
 
-        // CEI: marca antes de qualquer interação externa.
+        // CEI: mark before external interactions.
         leg.refunded = true;
         address maker = leg.maker;
         address token = leg.token;
         uint256 amount = leg.amount;
 
-        // os fundos voltam para o Settlement (que é o sender da trava no HTLC
-        // canônico imutável). Se a perna já foi resgatada ou ainda não expirou, o
-        // HTLC reverte aqui.
+        // Funds return to Settlement, the sender of the canonical immutable HTLC
+        // lock. If the leg was already redeemed or has not expired, the HTLC
+        // reverts here.
         IHashedTimelock(htlc).refund(contractId);
 
-        // repassa ao maker real.
+        // Forward to the true maker.
         if (token == address(0)) {
             (bool ok,) = payable(maker).call{value: amount}("");
             if (!ok) revert EthTransferFailed();
@@ -221,13 +221,13 @@ contract Settlement {
         emit LegRefunded(contractId, maker, amount);
     }
 
-    /// @dev Aceita o ETH devolvido pelo HTLC durante `refund`. Não há nenhuma
-    ///      outra forma de extrair ETH do contrato além de `settleLeg` (→HTLC) e
-    ///      `refundLeg` (→maker). ETH enviado diretamente aqui ficaria preso —
-    ///      não é fundo de swap e não há saque privilegiado.
+    /// @dev Accepts ETH returned by the HTLC during `refund`. There is no other
+    ///      way to extract ETH from this contract besides `settleLeg` (to HTLC)
+    ///      and `refundLeg` (to maker). ETH sent here directly would remain
+    ///      stuck; it is not swap funding and there is no privileged withdrawal.
     receive() external payable {}
 
-    // ---- helpers ERC-20 seguros (tolerantes a tokens sem retorno) ----
+    // ---- safe ERC-20 helpers tolerant of no-return tokens ----
 
     function _safeTransferFrom(address token, address from, address to, uint256 amount) private {
         (bool ok, bytes memory data) = token.call(abi.encodeWithSelector(IERC20.transferFrom.selector, from, to, amount));

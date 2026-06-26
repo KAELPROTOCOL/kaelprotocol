@@ -11,15 +11,15 @@
 
 ## 1. Built And Tested
 
-**Total: 139 passing tests, 0 ignored** (40 Foundry + 99 Rust).
+**Total: 143 passing tests, 0 ignored** (42 Foundry + 101 Rust).
 
-### Contracts (Foundry) - 40 tests
+### Contracts (Foundry) - 42 tests
 
 | Suite | Tests | Coverage |
 |---|---:|---|
 | `HashedTimelock.t.sol` | 9 | HTLC lock/redeem/refund, wrong preimage, double redeem, redeem after expiry, creation guards |
 | `Order.t.sol` | 10 | EIP-712 valid/invalid/expired signatures and ECDSA hardening |
-| `Settlement.t.sol` | 20 | Approach A settlement: authorization+nonce, chain binding, maker-only ETH/ERC-20 paths, replay, maker refund, non-custody, HTLC contractId binding for recipient/hashlock/timelock, and invalid local leg rollback |
+| `Settlement.t.sol` | 22 | Approach A settlement: authorization+nonce, chain binding, maker-only ETH/ERC-20 paths, replay, maker refund, non-custody, HTLC contractId binding for recipient/hashlock/timelock, invalid local leg rollback, ERC-20 EOA rejection, and insufficient allowance rejection |
 | `Vector.t.sol` | 1 | Emits the on-chain/off-chain EIP-712 equivalence vector |
 
 ### `orderbook` (Rust) - 26 tests
@@ -36,7 +36,7 @@
   expiry watchdog.
 - `full_flow` (1): capstone orderbook to settlement to maestro flow.
 
-### `swapkit` (Rust) - 64 tests, 0 ignored
+### `swapkit` (Rust) - 66 tests, 0 ignored
 
 - `verify` (19): counterparty-leg verification for hashlock, token, amount,
   recipient, asymmetric role timelock gap, and the absolute `now + min_gap`
@@ -47,11 +47,11 @@
   anvil integration.
 - `handshake` (5): deterministic Taker/Maker role assignment and pure
   `SwapContext` derivation.
-- `exec` (19): signer allowlist, `lock`/`redeem`/`refund` sends, hashlock
+- `exec` (21): signer allowlist, `lock`/`redeem`/`refund` sends, hashlock
   observation, confirmation depth, injected clock, and anti-TOCTOU re-checks.
   Includes a direct HTLC local e2e over two anvils; the closed local runner now
   locks/refunds through `Settlement` while observing and redeeming through the
-  canonical HTLC.
+  canonical HTLC, including an ERC-20 Settlement lock with exact allowance.
 
 ---
 
@@ -98,10 +98,10 @@
 ## Test Count Summary
 
 ```text
-Foundry  : 40 tests  (HashedTimelock 9, Order 10, Settlement 20, Vector 1)
+Foundry  : 42 tests  (HashedTimelock 9, Order 10, Settlement 22, Vector 1)
 orderbook: 26 tests  (lib 25 + integration 1)
 maestro  :  9 tests  (lib 6 + e2e 2 + full_flow 1)
-swapkit  : 64 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 19, incl. real anvil)
+swapkit  : 66 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 21, incl. real anvil)
 ---------------------------------------------------------------
-TOTAL    : 139 passing, 0 ignored
+TOTAL    : 143 passing, 0 ignored
 ```

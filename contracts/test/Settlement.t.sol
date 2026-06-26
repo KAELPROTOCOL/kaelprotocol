@@ -308,6 +308,31 @@ contract SettlementTest is Test {
         assertFalse(settlement.consumedNonce(bob, 2), "Bob nonce not consumed");
     }
 
+    function test_SettleLeg_ERC20_InsufficientAllowance_Reverts() public {
+        OrderLib.Order memory b = _orderB(2);
+        bytes memory sigB = _sign(b, bobPk);
+
+        vm.prank(bob);
+        vm.expectRevert(Settlement.TokenTransferFailed.selector);
+        settlement.settleLeg(b, sigB, alice, HL, block.timestamp + 2 hours);
+
+        assertFalse(settlement.consumedNonce(bob, 2), "Bob nonce not consumed");
+        assertEq(token.balanceOf(address(settlement)), 0);
+        assertEq(token.balanceOf(address(htlc)), 0);
+    }
+
+    function test_SettleLeg_ERC20_EoaToken_Reverts() public {
+        OrderLib.Order memory b = _orderB(2);
+        b.sellToken = address(0xBEEF);
+        bytes memory sigB = _sign(b, bobPk);
+
+        vm.prank(bob);
+        vm.expectRevert(Settlement.InvalidToken.selector);
+        settlement.settleLeg(b, sigB, alice, HL, block.timestamp + 2 hours);
+
+        assertFalse(settlement.consumedNonce(bob, 2), "Bob nonce not consumed");
+    }
+
     // Per-chain anti-replay: the same order/nonce twice reverts on the second attempt.
     function test_SettleLeg_Replay_Reverts() public {
         OrderLib.Order memory a = _orderA(1);

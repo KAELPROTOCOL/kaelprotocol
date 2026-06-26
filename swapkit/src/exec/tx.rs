@@ -4,9 +4,8 @@
 //! recalculate what the state machine already decided; they only map structs to
 //! parameters and send.
 //!
-//! MVP: native ETH only (`token = 0x0`); lock is `newSwap(...).value(amount)`.
-//! ERC-20 (`approve` + `newSwap` via `_safeTransferFrom`) is later work; here a
-//! nonzero token is explicitly rejected.
+//! Native ETH locks use `newSwap(...).value(amount)`. ERC-20 locks first approve
+//! exactly `amount` for the HTLC or Settlement spender, then call without ETH.
 //!
 //! Critical `contractId` equivalence: the `contractId` kept for refund is
 //! computed in Rust and must match the contract exactly:
@@ -53,13 +52,20 @@ sol! {
         function refundLeg(bytes32 contractId) external;
         function htlc() external view returns (address);
     }
+
+    #[sol(rpc)]
+    interface IERC20Write {
+        function approve(address spender, uint256 amount) external returns (bool);
+        function allowance(address owner, address spender) external view returns (uint256);
+        function balanceOf(address owner) external view returns (uint256);
+    }
 }
 
 /// Errors while building or sending a transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TxError {
-    /// The MVP supports native ETH (`token = 0x0`) only; ERC-20 is not supported yet.
-    TokenNotSupportedYet,
+    /// Amount zero is rejected before any approval or lock attempt.
+    ZeroAmount,
     /// Sending failed or the receipt could not be obtained.
     Send(String),
 }
@@ -67,12 +73,7 @@ pub enum TxError {
 impl std::fmt::Display for TxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TxError::TokenNotSupportedYet => {
-                write!(
-                    f,
-                    "MVP supports native ETH only (token=0x0); ERC-20 is future work"
-                )
-            }
+            TxError::ZeroAmount => write!(f, "amount must be greater than zero"),
             TxError::Send(e) => write!(f, "failed to send/mine tx: {e}"),
         }
     }
@@ -136,8 +137,8 @@ pub async fn lock(
     hashlock: [u8; 32],
     timelock: u64,
 ) -> Result<Locked, TxError> {
-    if token != [0u8; 20] {
-        return Err(TxError::TokenNotSupportedYet);
+    if amount == 0 {
+        return Err(TxError::ZeroAmount);
     }
     // On-chain sender is the signer address, which is what the contractId binds to.
     let contract_id = compute_contract_id(
@@ -150,15 +151,19 @@ pub async fn lock(
     );
 
     let htlc_c = IHashedTimelockWrite::new(EvmAddress::from(htlc), signer.provider());
-    let receipt = htlc_c
-        .newSwap(
-            EvmAddress::from(recipient),
-            EvmAddress::from(token),
-            U256::from(amount),
-            B256::from(hashlock),
-            U256::from(timelock),
-        )
-        .value(U256::from(amount))
+    let mut call = htlc_c.newSwap(
+        EvmAddress::from(recipient),
+        EvmAddress::from(token),
+        U256::from(amount),
+        B256::from(hashlock),
+        U256::from(timelock),
+    );
+    if token == [0u8; 20] {
+        call = call.value(U256::from(amount));
+    } else {
+        approve_exact(signer, token, htlc, amount).await?;
+    }
+    let receipt = call
         .send()
         .await
         .map_err(|e| TxError::Send(format!("{e}")))?
@@ -183,8 +188,8 @@ pub async fn lock_via_settlement(
     hashlock: [u8; 32],
     timelock: u64,
 ) -> Result<Locked, TxError> {
-    if token != [0u8; 20] {
-        return Err(TxError::TokenNotSupportedYet);
+    if amount == 0 {
+        return Err(TxError::ZeroAmount);
     }
 
     let order = Order {
@@ -222,15 +227,19 @@ pub async fn lock_via_settlement(
         validUntil: U256::from(order.valid_until),
         nonce: U256::from(order.nonce),
     };
-    let receipt = settlement
-        .settleLeg(
-            sol_order,
-            Bytes::copy_from_slice(&signature),
-            EvmAddress::from(recipient),
-            B256::from(hashlock),
-            U256::from(timelock),
-        )
-        .value(U256::from(amount))
+    let mut call = settlement.settleLeg(
+        sol_order,
+        Bytes::copy_from_slice(&signature),
+        EvmAddress::from(recipient),
+        B256::from(hashlock),
+        U256::from(timelock),
+    );
+    if token == [0u8; 20] {
+        call = call.value(U256::from(amount));
+    } else {
+        approve_exact(signer, token, config.settlement, amount).await?;
+    }
+    let receipt = call
         .send()
         .await
         .map_err(|e| TxError::Send(format!("{e}")))?
@@ -242,6 +251,37 @@ pub async fn lock_via_settlement(
         contract_id,
         tx_hash: receipt.transaction_hash.0,
     })
+}
+
+async fn approve_exact(
+    signer: &Signer,
+    token: Address,
+    spender: Address,
+    amount: u128,
+) -> Result<(), TxError> {
+    let token_c = IERC20Write::new(EvmAddress::from(token), signer.provider());
+    token_c
+        .approve(EvmAddress::from(spender), U256::from(amount))
+        .send()
+        .await
+        .map_err(|e| TxError::Send(format!("{e}")))?
+        .get_receipt()
+        .await
+        .map_err(|e| TxError::Send(format!("{e}")))?;
+    let allowance = token_c
+        .allowance(
+            EvmAddress::from(signer.address()),
+            EvmAddress::from(spender),
+        )
+        .call()
+        .await
+        .map_err(|e| TxError::Send(format!("{e}")))?;
+    if allowance != U256::from(amount) {
+        return Err(TxError::Send(format!(
+            "ERC-20 allowance mismatch after approve: expected {amount}, got {allowance}"
+        )));
+    }
+    Ok(())
 }
 
 /// Redeems the counterparty leg by revealing `secret`: `redeem(contract_id, secret)`.
@@ -317,6 +357,12 @@ mod tests {
         #[sol(rpc)]
         Settlement,
         "../contracts/out/Settlement.sol/Settlement.json"
+    }
+
+    sol! {
+        #[sol(rpc)]
+        MockERC20,
+        "../contracts/out/MockERC20.sol/MockERC20.json"
     }
 
     // Anvil key #0 from the default mnemonic, same as the signer test.
@@ -475,6 +521,88 @@ mod tests {
         assert_eq!(onchain.timelock, U256::from(timelock));
     }
 
+    #[tokio::test]
+    async fn settlement_lock_supports_erc20_with_exact_allowance() {
+        let anvil = Anvil::new().spawn();
+        let pk: PrivateKeySigner = anvil.keys()[0].clone().into();
+        let wallet = EthereumWallet::from(pk);
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect_http(anvil.endpoint_url());
+
+        let htlc = HashedTimelock::deploy(provider.clone()).await.unwrap();
+        let settlement = Settlement::deploy(provider.clone(), *htlc.address())
+            .await
+            .unwrap();
+        let token = MockERC20::deploy(provider.clone()).await.unwrap();
+
+        let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint())
+            .await
+            .unwrap();
+        let token_addr = (*token.address()).into_array();
+        let amount: u128 = 750;
+        token
+            .mint(EvmAddress::from(signer.address()), U256::from(amount))
+            .send()
+            .await
+            .unwrap()
+            .get_receipt()
+            .await
+            .unwrap();
+
+        let recipient = [0x7Au8; 20];
+        let preimage = [0x61u8; 32];
+        let hashlock = hashlock_from_preimage(&preimage);
+        let timelock = now_unix() + 3600;
+
+        let locked = lock_via_settlement(
+            &signer,
+            &SettlementLockConfig {
+                settlement: (*settlement.address()).into_array(),
+                maker_private_key: hex_key(ANVIL_KEY0),
+                sell_chain_id: 31337,
+                buy_token: [0u8; 20],
+                buy_chain_id: 31338,
+                buy_amount: amount,
+                valid_until: timelock,
+                nonce: 2,
+            },
+            recipient,
+            token_addr,
+            amount,
+            hashlock,
+            timelock,
+        )
+        .await
+        .unwrap();
+
+        let onchain = htlc
+            .getSwap(B256::from(locked.contract_id))
+            .call()
+            .await
+            .unwrap();
+        assert_eq!(onchain.sender, *settlement.address());
+        assert_eq!(onchain.recipient, EvmAddress::from(recipient));
+        assert_eq!(onchain.token, *token.address());
+        assert_eq!(onchain.amount, U256::from(amount));
+        assert_eq!(
+            token
+                .allowance(EvmAddress::from(signer.address()), *settlement.address())
+                .call()
+                .await
+                .unwrap(),
+            U256::ZERO
+        );
+        assert_eq!(
+            token.balanceOf(*htlc.address()).call().await.unwrap(),
+            U256::from(amount)
+        );
+        assert_eq!(
+            token.balanceOf(*settlement.address()).call().await.unwrap(),
+            U256::ZERO
+        );
+    }
+
     // Real refund after expiry: advances anvil time past the timelock and proves
     // refund returns funds for the same contractId stored by lock.
     #[tokio::test]
@@ -535,9 +663,8 @@ mod tests {
         );
     }
 
-    // ETH-only: token != 0x0 is explicitly rejected.
     #[tokio::test]
-    async fn lock_rejects_erc20_token_for_now() {
+    async fn lock_rejects_zero_amount_before_sending() {
         let anvil = Anvil::new().spawn();
         let signer = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint())
             .await
@@ -546,13 +673,13 @@ mod tests {
             &signer,
             [0x11; 20],
             [0x7A; 20],
-            [0x22; 20], // token != 0x0
-            500,
+            [0x22; 20],
+            0,
             [0xAB; 32],
             now_unix() + 3600,
         )
         .await;
-        assert_eq!(r, Err(TxError::TokenNotSupportedYet));
+        assert_eq!(r, Err(TxError::ZeroAmount));
     }
 
     fn hex_key(s: &str) -> [u8; 32] {

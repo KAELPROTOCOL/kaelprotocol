@@ -12,8 +12,10 @@ Safety rules:
 - no real funds;
 - only local Anvil or closed developer testnet RPCs allowed by the signer allowlist;
 - no removal of the `KAEL_CLOSED_TESTNET_SEND_TX` confirmation gate;
-- Settlement-mediated native ETH HTLC only for the closed-testnet runner;
-- no ERC-20, p2p, bridge, oracle, or custody in this runner.
+- Settlement-mediated native ETH by default for the closed-testnet runner;
+- ERC-20 is supported by the transaction executor and private-testnet paths, but
+  this developer runner defaults to native ETH unless `KAEL_TOKEN_A/B` are set;
+- no p2p, bridge, oracle, or custody in this runner.
 
 ## Prerequisites
 
@@ -58,6 +60,8 @@ export KAEL_HTLC_A="..."
 export KAEL_HTLC_B="..."
 export KAEL_SETTLEMENT_A="..."
 export KAEL_SETTLEMENT_B="..."
+export KAEL_TOKEN_A="0x0000000000000000000000000000000000000000"
+export KAEL_TOKEN_B="0x0000000000000000000000000000000000000000"
 export KAEL_SIGNER_KEY_A="..."
 export KAEL_SIGNER_KEY_B="..."
 export KAEL_AMOUNT_A_WEI="1000000000000000"
@@ -136,4 +140,4 @@ kill <pid-for-8545-or-8546>
 
 ## Current Limits
 
-The closed-testnet runner is a developer-only Settlement-mediated native ETH HTLC flow. It assumes both developer keys are available to this process and does not include ERC-20 support, public p2p coordination, fee/RBF policy, multi-RPC quorum, or production restart hardening.
+The closed-testnet runner is a developer-only Settlement-mediated HTLC flow. It defaults to native ETH and can use ERC-20 token legs when `KAEL_TOKEN_A/B` point to token contracts with sufficient test balances. It assumes both developer keys are available to this process and does not include public p2p coordination, fee/RBF policy, multi-RPC quorum, or production restart hardening.

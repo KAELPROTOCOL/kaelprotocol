@@ -13,6 +13,7 @@ struct LegConfig {
     chain_id: u64,
     htlc: Address,
     settlement: Address,
+    token: Address,
     key: String,
     key_bytes: [u8; 32],
     amount: u128,
@@ -97,6 +98,20 @@ async fn run() -> Result<(), RunnerError> {
         config.maker.htlc,
     )
     .await?;
+    validate_token_contract(
+        "A",
+        &config.taker.rpc,
+        config.taker.chain_id,
+        config.taker.token,
+    )
+    .await?;
+    validate_token_contract(
+        "B",
+        &config.maker.rpc,
+        config.maker.chain_id,
+        config.maker.token,
+    )
+    .await?;
 
     let taker_own = Signer::from_key_str(&config.taker.key, &config.taker.rpc)
         .await
@@ -131,11 +146,11 @@ async fn run() -> Result<(), RunnerError> {
 
     let taker_ctx = SwapContext {
         role: Role::Taker,
-        my_token: [0u8; 20],
+        my_token: config.taker.token,
         my_amount: config.taker.amount,
         my_timelock: now.saturating_add(config.taker_lock_secs),
         my_recipient: maker_own.address(),
-        cp_token: [0u8; 20],
+        cp_token: config.maker.token,
         cp_amount: config.maker.amount,
         me: taker_own.address(),
         min_gap: config.min_gap,
@@ -148,11 +163,11 @@ async fn run() -> Result<(), RunnerError> {
     };
     let maker_ctx = SwapContext {
         role: Role::Maker,
-        my_token: [0u8; 20],
+        my_token: config.maker.token,
         my_amount: config.maker.amount,
         my_timelock: now.saturating_add(config.maker_lock_secs),
         my_recipient: taker_own.address(),
-        cp_token: [0u8; 20],
+        cp_token: config.taker.token,
         cp_amount: config.taker.amount,
         me: maker_own.address(),
         min_gap: config.min_gap,
@@ -175,7 +190,7 @@ async fn run() -> Result<(), RunnerError> {
             settlement: config.taker.settlement,
             maker_private_key: config.taker.key_bytes,
             sell_chain_id: config.taker.chain_id,
-            buy_token: [0u8; 20],
+            buy_token: config.maker.token,
             buy_chain_id: config.maker.chain_id,
             buy_amount: config.maker.amount,
             valid_until: now.saturating_add(config.taker_lock_secs),
@@ -203,7 +218,7 @@ async fn run() -> Result<(), RunnerError> {
             settlement: config.maker.settlement,
             maker_private_key: config.maker.key_bytes,
             sell_chain_id: config.maker.chain_id,
-            buy_token: [0u8; 20],
+            buy_token: config.taker.token,
             buy_chain_id: config.taker.chain_id,
             buy_amount: config.taker.amount,
             valid_until: now.saturating_add(config.maker_lock_secs),
@@ -362,6 +377,45 @@ async fn validate_settlement_contract(
     Ok(())
 }
 
+async fn validate_token_contract(
+    name: &str,
+    rpc: &str,
+    expected_chain_id: u64,
+    token: Address,
+) -> Result<(), RunnerError> {
+    let token_address = EvmAddress::from(token);
+    if token_address == EvmAddress::ZERO {
+        return Ok(());
+    }
+
+    let rpc_url = rpc
+        .parse()
+        .map_err(|e| RunnerError(format!("KAEL_RPC_{name} is invalid: {e}")))?;
+    let provider = ProviderBuilder::new().connect_http(rpc_url);
+    let chain_id = provider
+        .get_chain_id()
+        .await
+        .map_err(|e| RunnerError(format!("RPC {name} failed to read chain_id: {e}")))?;
+    if chain_id != expected_chain_id {
+        return Err(RunnerError(format!(
+            "KAEL_CHAIN_{name} expected {expected_chain_id}, RPC returned {chain_id}"
+        )));
+    }
+    assert_chain_allowed(chain_id).map_err(|e| RunnerError(format!("{e}")))?;
+
+    let code = provider
+        .get_code_at(token_address)
+        .await
+        .map_err(|e| RunnerError(format!("RPC {name} failed to read ERC-20 token: {e}")))?;
+    if code.is_empty() {
+        return Err(RunnerError(format!(
+            "KAEL_TOKEN_{name} is invalid: {token_address} has no bytecode on chain {chain_id}; aborting before any broadcast"
+        )));
+    }
+
+    Ok(())
+}
+
 fn read_config() -> Result<SwapConfig, RunnerError> {
     let max_amount =
         env_u128("KAEL_CLOSED_TESTNET_MAX_AMOUNT_WEI")?.unwrap_or(10_000_000_000_000_000u128);
@@ -371,6 +425,11 @@ fn read_config() -> Result<SwapConfig, RunnerError> {
     let maker_amount = env_required("KAEL_AMOUNT_B_WEI")?
         .parse()
         .map_err(|e| RunnerError(format!("KAEL_AMOUNT_B_WEI is invalid: {e}")))?;
+    if taker_amount == 0 || maker_amount == 0 {
+        return Err(RunnerError(
+            "KAEL_AMOUNT_A_WEI and KAEL_AMOUNT_B_WEI must be greater than zero".into(),
+        ));
+    }
     if taker_amount > max_amount || maker_amount > max_amount {
         return Err(RunnerError(format!(
             "amount exceeds KAEL_CLOSED_TESTNET_MAX_AMOUNT_WEI ({max_amount})"
@@ -383,6 +442,7 @@ fn read_config() -> Result<SwapConfig, RunnerError> {
             chain_id: env_u64_required("KAEL_CHAIN_A")?,
             htlc: env_address("KAEL_HTLC_A")?,
             settlement: env_address("KAEL_SETTLEMENT_A")?,
+            token: env_optional_address("KAEL_TOKEN_A")?,
             key: env_required("KAEL_SIGNER_KEY_A")?,
             key_bytes: env_private_key("KAEL_SIGNER_KEY_A")?,
             amount: taker_amount,
@@ -393,6 +453,7 @@ fn read_config() -> Result<SwapConfig, RunnerError> {
             chain_id: env_u64_required("KAEL_CHAIN_B")?,
             htlc: env_address("KAEL_HTLC_B")?,
             settlement: env_address("KAEL_SETTLEMENT_B")?,
+            token: env_optional_address("KAEL_TOKEN_B")?,
             key: env_required("KAEL_SIGNER_KEY_B")?,
             key_bytes: env_private_key("KAEL_SIGNER_KEY_B")?,
             amount: maker_amount,
@@ -444,6 +505,19 @@ fn env_address(name: &str) -> Result<Address, RunnerError> {
         .parse()
         .map_err(|e| RunnerError(format!("{name} is invalid: {e}")))?;
     Ok(parsed.into_array())
+}
+
+fn env_optional_address(name: &str) -> Result<Address, RunnerError> {
+    match std::env::var(name) {
+        Ok(v) => {
+            let parsed: EvmAddress = v
+                .parse()
+                .map_err(|e| RunnerError(format!("{name} is invalid: {e}")))?;
+            Ok(parsed.into_array())
+        }
+        Err(std::env::VarError::NotPresent) => Ok([0u8; 20]),
+        Err(e) => Err(RunnerError(format!("{name} is invalid: {e}"))),
+    }
 }
 
 fn env_private_key(name: &str) -> Result<[u8; 32], RunnerError> {

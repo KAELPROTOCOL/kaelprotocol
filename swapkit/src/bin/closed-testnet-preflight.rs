@@ -9,6 +9,7 @@ struct LegConfig {
     expected_chain_id: u64,
     htlc: EvmAddress,
     settlement: EvmAddress,
+    token: EvmAddress,
     key: String,
     amount: Option<U256>,
 }
@@ -60,6 +61,8 @@ async fn run() -> Result<(), PreflightError> {
     check_leg(&leg_b, &provider_b).await?;
     check_settlement(&leg_a, &provider_a).await?;
     check_settlement(&leg_b, &provider_b).await?;
+    check_token(&leg_a, &provider_a).await?;
+    check_token(&leg_b, &provider_b).await?;
     check_cross_chain_balances(
         &leg_a,
         &leg_b,
@@ -90,9 +93,40 @@ fn read_leg(suffix: &'static str) -> Result<LegConfig, PreflightError> {
         settlement: env_required(&format!("KAEL_SETTLEMENT_{suffix}"))?
             .parse()
             .map_err(|e| PreflightError(format!("KAEL_SETTLEMENT_{suffix} is invalid: {e}")))?,
+        token: env_address_optional(&format!("KAEL_TOKEN_{suffix}"))?,
         key: env_required(&format!("KAEL_SIGNER_KEY_{suffix}"))?,
         amount: env_u256(&format!("KAEL_AMOUNT_{suffix}_WEI"))?,
     })
+}
+
+async fn check_token<P>(config: &LegConfig, provider: &P) -> Result<(), PreflightError>
+where
+    P: Provider,
+{
+    if config.token == EvmAddress::ZERO {
+        return Ok(());
+    }
+    let chain_id = provider
+        .get_chain_id()
+        .await
+        .map_err(|e| PreflightError(format!("RPC {} failed to read chain_id: {e}", config.name)))?;
+    let code = provider.get_code_at(config.token).await.map_err(|e| {
+        PreflightError(format!(
+            "RPC {} failed to read ERC-20 token: {e}",
+            config.name
+        ))
+    })?;
+    if code.is_empty() {
+        return Err(PreflightError(format!(
+            "KAEL_TOKEN_{} is invalid: {} has no bytecode on chain {}",
+            config.name, config.token, chain_id
+        )));
+    }
+    println!(
+        "Token {} OK: token={}, chain_id={}",
+        config.name, config.token, chain_id
+    );
+    Ok(())
 }
 
 async fn check_settlement<P>(config: &LegConfig, provider: &P) -> Result<(), PreflightError>
@@ -205,7 +239,7 @@ where
         address_a,
         "A",
         provider_a,
-        min_gas_balance_wei.saturating_add(leg_a.amount.unwrap_or(U256::ZERO)),
+        min_gas_balance_wei.saturating_add(native_value_required(leg_a)),
     )
     .await?;
     check_balance("A", address_a, "B", provider_b, min_gas_balance_wei).await?;
@@ -215,10 +249,53 @@ where
         address_b,
         "B",
         provider_b,
-        min_gas_balance_wei.saturating_add(leg_b.amount.unwrap_or(U256::ZERO)),
+        min_gas_balance_wei.saturating_add(native_value_required(leg_b)),
     )
     .await?;
+    check_token_balance("A", address_a, leg_a, provider_a).await?;
+    check_token_balance("B", address_b, leg_b, provider_b).await?;
 
+    Ok(())
+}
+
+fn native_value_required(leg: &LegConfig) -> U256 {
+    if leg.token == EvmAddress::ZERO {
+        leg.amount.unwrap_or(U256::ZERO)
+    } else {
+        U256::ZERO
+    }
+}
+
+async fn check_token_balance<P>(
+    signer_name: &str,
+    address: EvmAddress,
+    leg: &LegConfig,
+    provider: &P,
+) -> Result<(), PreflightError>
+where
+    P: Provider,
+{
+    if leg.token == EvmAddress::ZERO {
+        return Ok(());
+    }
+    let required = leg.amount.unwrap_or(U256::ZERO);
+    let token = swapkit::exec::tx::IERC20Write::new(leg.token, provider);
+    let balance = token.balanceOf(address).call().await.map_err(|e| {
+        PreflightError(format!(
+            "RPC {} failed to read signer {signer_name} ERC-20 balance: {e}",
+            leg.name
+        ))
+    })?;
+    if balance < required {
+        return Err(PreflightError(format!(
+            "insufficient ERC-20 balance: signer {signer_name} on chain {} has {balance} token wei, required {required} token wei",
+            leg.name
+        )));
+    }
+    println!(
+        "Token balance OK: signer {signer_name} on chain {}, token={}, balance={balance}, required={required}",
+        leg.name, leg.token
+    );
     Ok(())
 }
 
@@ -260,6 +337,16 @@ fn signer_for_leg(config: &LegConfig) -> Result<PrivateKeySigner, PreflightError
 
 fn env_required(name: &str) -> Result<String, PreflightError> {
     std::env::var(name).map_err(|_| PreflightError(format!("missing required variable: {name}")))
+}
+
+fn env_address_optional(name: &str) -> Result<EvmAddress, PreflightError> {
+    match std::env::var(name) {
+        Ok(v) => v
+            .parse()
+            .map_err(|e| PreflightError(format!("{name} is invalid: {e}"))),
+        Err(std::env::VarError::NotPresent) => Ok(EvmAddress::ZERO),
+        Err(e) => Err(PreflightError(format!("{name} is invalid: {e}"))),
+    }
 }
 
 fn env_u64(name: &str) -> Result<Option<u64>, PreflightError> {

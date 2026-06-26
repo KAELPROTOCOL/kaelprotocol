@@ -114,4 +114,4 @@ CLOSED TESTNET SWAP OK
 
 ## Remaining Limits
 
-Closed testnet is still a developer-only milestone. The runner is Settlement-mediated native ETH HTLC only and assumes both developer keys are available to this process. Before public testnet or any real funds, Kael still needs fee/RBF policy, per-chain timelock and confirmation calibration, multi-RPC quorum or trustless verification, persistence/restart hardening, and professional independent audit.
+Closed testnet is still a developer-only milestone. The runner is Settlement-mediated HTLC, defaults to native ETH, and can use ERC-20 token legs when `KAEL_TOKEN_A/B` point to token contracts with sufficient test balances. It assumes both developer keys are available to this process. Before public testnet or any real funds, Kael still needs fee/RBF policy, per-chain timelock and confirmation calibration, multi-RPC quorum or trustless verification, persistence/restart hardening, and professional independent audit.

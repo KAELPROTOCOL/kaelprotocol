@@ -12,8 +12,8 @@ contract HashedTimelockTest is Test {
     address sender = address(0xA11CE);
     address recipient = address(0xB0B);
 
-    bytes32 preimage = keccak256("o-segredo-do-kael");
-    bytes32 hashlock; // SHA-256 do preimage (fonte de verdade do contrato)
+    bytes32 preimage = keccak256("kael-secret");
+    bytes32 hashlock; // SHA-256 of the preimage, matching contract semantics
     uint256 timelock;
 
     function setUp() public {
@@ -24,7 +24,7 @@ contract HashedTimelockTest is Test {
         vm.deal(sender, 100 ether);
     }
 
-    // 1) resgate ETH com preimage certo
+    // 1) ETH redeem with the correct preimage.
     function test_RedeemEth_Success() public {
         vm.prank(sender);
         bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
@@ -35,7 +35,7 @@ contract HashedTimelockTest is Test {
         assertTrue(htlc.getSwap(id).withdrawn);
     }
 
-    // 2) resgate ERC-20 com preimage certo
+    // 2) ERC-20 redeem with the correct preimage.
     function test_RedeemErc20_Success() public {
         token.mint(sender, 10 ether);
         vm.startPrank(sender);
@@ -48,16 +48,16 @@ contract HashedTimelockTest is Test {
         assertEq(token.balanceOf(address(htlc)), 0);
     }
 
-    // 3) resgate com preimage errado => revert
+    // 3) Wrong preimage redeem reverts.
     function test_RedeemWrongPreimage_Reverts() public {
         vm.prank(sender);
         bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
 
         vm.expectRevert(HashedTimelock.InvalidPreimage.selector);
-        htlc.redeem(id, keccak256("errado"));
+        htlc.redeem(id, keccak256("wrong"));
     }
 
-    // 4) duplo resgate => revert
+    // 4) Double redeem reverts.
     function test_DoubleRedeem_Reverts() public {
         vm.prank(sender);
         bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
@@ -67,7 +67,7 @@ contract HashedTimelockTest is Test {
         htlc.redeem(id, preimage);
     }
 
-    // 5) refund antes do prazo => revert
+    // 5) Refund before the deadline reverts.
     function test_RefundBeforeTimelock_Reverts() public {
         vm.prank(sender);
         bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
@@ -77,7 +77,7 @@ contract HashedTimelockTest is Test {
         htlc.refund(id);
     }
 
-    // 6) refund após o prazo => sucesso
+    // 6) Refund after the deadline succeeds.
     function test_RefundAfterTimelock_Success() public {
         vm.prank(sender);
         bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
@@ -90,7 +90,7 @@ contract HashedTimelockTest is Test {
         assertTrue(htlc.getSwap(id).refunded);
     }
 
-    // 7) refund por quem não é o sender => revert
+    // 7) Refund by a non-sender reverts.
     function test_RefundByNonSender_Reverts() public {
         vm.prank(sender);
         bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
@@ -101,7 +101,7 @@ contract HashedTimelockTest is Test {
         htlc.refund(id);
     }
 
-    // extra: rejeições de criação (timelock no passado, amount zero, hashlock zero, duplicado)
+    // Extra creation guards: past timelock, zero amount, zero hashlock, duplicate id.
     function test_NewSwapGuards() public {
         vm.startPrank(sender);
         vm.expectRevert(HashedTimelock.TimelockInPast.selector);
@@ -113,21 +113,23 @@ contract HashedTimelockTest is Test {
         vm.expectRevert(HashedTimelock.ZeroHashlock.selector);
         htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, bytes32(0), timelock);
 
+        vm.expectRevert(HashedTimelock.InvalidToken.selector);
+        htlc.newSwap(recipient, address(0xBEEF), 1 ether, hashlock, timelock);
+
         htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
         vm.expectRevert(HashedTimelock.SwapAlreadyExists.selector);
         htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
         vm.stopPrank();
     }
 
-    // GRUPO 2 — resgate APÓS o timelock expirar deve reverter (janela fechou).
-    // redeem exige block.timestamp < s.timelock (HashedTimelock.sol:110),
-    // senão reverte TimelockExpired — mesmo com o preimage CORRETO.
+    // Group 2: redeem after the timelock expires must revert because the
+    // redeem window is closed, even with the correct preimage.
     function test_RedeemAfterTimelock_Reverts() public {
         vm.prank(sender);
         bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
 
-        vm.warp(timelock + 1); // janela de resgate fechou
+        vm.warp(timelock + 1); // redeem window closed
         vm.expectRevert(HashedTimelock.TimelockExpired.selector);
-        htlc.redeem(id, preimage); // preimage correto, mas tarde demais
+        htlc.redeem(id, preimage); // correct preimage, but too late
     }
 }
