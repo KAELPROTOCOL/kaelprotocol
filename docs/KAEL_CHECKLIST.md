@@ -30,6 +30,7 @@ Last updated: 2026-06-25
 - Adversarial coverage added for direct HTLC terminal-state conflicts and private-testnet operational failures covering EOA HTLC, EOA Settlement, invalid ERC-20 token, missing send confirmation, and missing cross-chain gas for each signer.
 - Fuzz and property coverage added in `contracts/test/MainnetReadinessFuzz.t.sol` and `swapkit/tests/mainnet_readiness_properties.rs`.
 - Defensive hardening added to redact secrets from `NextAction` debug output and remove `Debug` from `SwapContext`.
+- Internal audit report, findings register, and risk register added in `docs/INTERNAL_AUDIT_REPORT.md`, `docs/FINDINGS_REGISTER.md`, and `docs/RISK_REGISTER.md`.
 
 ## Current Milestone
 
@@ -40,6 +41,7 @@ Last updated: 2026-06-25
 - Closed testnet Settlement-mediated swap runner: concluded for developer-only native ETH HTLC scope.
 - Closed local automatic runner: available for two local Anvil chains.
 - Mainnet-like private testnet runner: available for local/private audit-gate validation; not mainnet and not real funds.
+- Internal audit package: available for professional audit handoff; not production approval.
 
 Expected local command:
 
