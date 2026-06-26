@@ -109,7 +109,7 @@ mod tests {
             .as_secs()
     }
 
-    // Sobe anvil + carteira, faz deploy do HTLC, e devolve o que os testes precisam.
+    // Starts anvil and wallet, deploys HTLC, and returns what the tests need.
     async fn setup() -> (
         alloy::node_bindings::AnvilInstance,
         DynProvider,

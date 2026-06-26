@@ -370,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_verifier_reads_real_chain_and_drives_wallet() {
-        // --- sobe anvil + carteira ---
+        // --- start anvil and wallet ---
         let anvil = Anvil::new().chain_id(10).spawn();
         let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
         let sender = signer.address();
