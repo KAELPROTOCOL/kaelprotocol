@@ -1,32 +1,16 @@
-//! Leitura da outra chain — a fronteira de confiança do MVP.
 //!
-//! `verify_counterparty_leg` consome um [`ObservedLock`]; ESTE módulo é quem o
-//! produz, lendo a trava HTLC na chain alvo. A leitura fica atrás da interface
-//! [`ChainVerifier`] para que uma implementação SPV/light-client possa
 //! substituir o RPC depois, SEM reescrever a carteira.
 //!
-//! HONESTIDADE SOBRE CONFIANÇA:
-//! - [`RpcVerifier`] (a impl do MVP) é **trust-minimized, NÃO trustless**: ela
-//!   confia que o nó RPC reporta o estado real da chain. Um nó malicioso poderia
-//!   mentir sobre a existência/parâmetros de uma trava.
-//! - Uma futura impl SPV/light-client (verificando provas de inclusão contra
-//!   cabeçalhos de bloco) seria trustless. Essa é a evolução prevista da
-//!   fronteira de confiança — a interface existe justamente para permiti-la.
 
 use crate::verify::{Address, ObservedLock};
 
 /// Erros ao ler a chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChainError {
-    /// URL de RPC inválida.
     BadUrl(String),
-    /// falha de rede / RPC (timeout, conexão, erro do nó).
     Rpc(String),
-    /// resposta malformada / não-decodificável.
     Decode(String),
-    /// o amount on-chain (uint256) não cabe em u128.
     AmountOverflow,
-    /// o timelock on-chain (uint256) não cabe em u64.
     TimelockOverflow,
 }
 
@@ -37,20 +21,9 @@ impl std::fmt::Display for ChainError {
 }
 impl std::error::Error for ChainError {}
 
-/// Resultado de observar a perna oposta, COM profundidade de confirmação levada
-/// em conta (anti-reorg). Três vias:
 ///
 /// - [`Confirmed`](LockObservation::Confirmed): trava ativa E suficientemente
-///   funda (≥ `min_confirmations`). É a ÚNICA via segura para agir.
-/// - [`Shallow`](LockObservation::Shallow): trava ativa, mas RASA — pode ser
-///   revertida por um reorg. NÃO é segura para agir ainda; só esperar mais.
-/// - [`Absent`](LockObservation::Absent): nenhuma trava ativa (inexistente, já
-///   resgatada ou já reembolsada).
 ///
-/// SEGURANÇA (G2): tanto `Shallow` quanto `Absent` mapeiam para "não vista" no
-/// gate ([`for_gate`](LockObservation::for_gate) → `None`) — a máquina ESPERA
-/// nos dois casos. A distinção existe só para telemetria/log, NUNCA enfraquece a
-/// decisão.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LockObservation {
     Confirmed(ObservedLock),
@@ -58,19 +31,11 @@ pub enum LockObservation {
     Absent,
 }
 
-/// Convenção ÚNICA de profundidade: o bloco de inclusão conta como a 1ª
-/// confirmação. `confirmações = head − bloco + 1` (saturando). É usada TANTO na
-/// leitura da perna oposta ([`RpcVerifier::observe_lock`]) QUANTO na confirmação
-/// das minhas próprias txs (`exec::confirm`) — uma só noção de profundidade no
-/// código, nunca duas.
 pub fn confirmations(head: u64, block: u64) -> u64 {
     head.saturating_sub(block) + 1
 }
 
 impl LockObservation {
-    /// O que o gate/máquina de estados consome. SÓ `Confirmed` vira uma trava
-    /// observada; `Shallow` e `Absent` viram `None` (a máquina espera). Esta é a
-    /// fronteira que garante: nunca agir contra uma trava rasa ou ausente.
     pub fn for_gate(&self) -> Option<ObservedLock> {
         match self {
             LockObservation::Confirmed(o) => Some(*o),
@@ -79,21 +44,12 @@ impl LockObservation {
     }
 }
 
-/// Interface de leitura de chain. Produz o [`LockObservation`] que a verificação
 /// consome.
 ///
-/// CONFIANÇA: implementações via RPC (como [`RpcVerifier`]) são
-/// **trust-minimized** — confiam que o nó diz a verdade. Uma impl SPV/light-client
-/// seria **trustless**. Esta interface é a costura que permite trocar uma pela
-/// outra sem mexer no resto da carteira. É a fronteira de confiança do MVP.
 #[allow(async_fn_in_trait)]
 pub trait ChainVerifier {
-    /// Lê a trava HTLC identificada por `contract_id` no contrato `htlc_address`,
     /// exigindo `min_confirmations` de PROFUNDIDADE (anti-reorg).
     ///
-    /// Convenção de contagem: o bloco de inclusão conta como a 1ª confirmação, ou
-    /// seja `confirmações = head − bloco_de_criação + 1`. Logo `min_confirmations
-    /// = 1` significa "precisa estar minerada" — equivalente ao comportamento
     /// antigo (profundidade 0); `min_confirmations = 0` aceita qualquer coisa
     /// ativa. Erros de leitura viram [`ChainError`].
     async fn observe_lock(
@@ -104,8 +60,6 @@ pub trait ChainVerifier {
     ) -> Result<LockObservation, ChainError>;
 }
 
-/// Espelho da struct `Swap` do HashedTimelock, já decodificada para tipos Rust.
-/// Existir como tipo próprio permite testar o MAPEAMENTO sem rede.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawSwap {
     pub sender: Address,
@@ -118,14 +72,9 @@ pub struct RawSwap {
     pub refunded: bool,
 }
 
-/// Mapeamento PURO Swap → ObservedLock.
+/// Pure Swap to ObservedLock mapping.
 ///
 /// MODELAGEM DE `exists`: reportamos `exists = true` apenas para uma trava
-/// **ATIVA e resgatável** — presente on-chain (`sender != 0`) E ainda não
-/// `withdrawn` nem `refunded`. Justificativa: a verificação serve para decidir
-/// se vale agir contra a perna oposta; uma trava já resgatada ou reembolsada
-/// não é algo em que a contraparte possa confiar para resgate, então tratá-la
-/// como "inexistente" (`exists=false → LockNotFound`) é o comportamento seguro.
 pub fn observed_from_swap(s: &RawSwap) -> ObservedLock {
     let active = s.sender != [0u8; 20] && !s.withdrawn && !s.refunded;
     ObservedLock {
@@ -140,7 +89,6 @@ pub fn observed_from_swap(s: &RawSwap) -> ObservedLock {
 }
 
 // ------------------------------------------------------------------------
-// Implementação RPC (alloy). Trust-minimized: confia no nó.
 // ------------------------------------------------------------------------
 
 use alloy::primitives::{Address as EvmAddress, B256, U256};
@@ -149,9 +97,6 @@ use alloy::rpc::types::Filter;
 use alloy::sol;
 use alloy::sol_types::SolEvent;
 
-// Interface mínima do HashedTimelock para LER a trava: a view getSwap (parâmetros
-// atuais) + o evento LogNewSwap (bloco de criação, p/ medir profundidade). A
-// assinatura do evento DEVE ser idêntica à do contrato — o SIGNATURE_HASH é o
 // que filtra o log certo.
 sol! {
     #[sol(rpc)]
@@ -181,14 +126,11 @@ sol! {
 
 /// Leitor de chain via RPC EVM (alloy).
 ///
-/// TRUST-MINIMIZED, NÃO TRUSTLESS: confia que o endpoint RPC reporta o estado
-/// real da chain. Substituível por uma impl SPV/light-client trustless.
 pub struct RpcVerifier {
     provider: DynProvider,
 }
 
 impl RpcVerifier {
-    /// Conecta a um endpoint HTTP RPC. Não faz I/O ainda (HTTP é preguiçoso).
     pub fn new(rpc_url: &str) -> Result<Self, ChainError> {
         let url = rpc_url
             .parse()
@@ -209,8 +151,6 @@ impl RpcVerifier {
     /// Bloco em que a trava `contract_id` foi CRIADA, lido do `LogNewSwap`
     /// (filtrado pelo `contractId` indexado). `None` se nenhum log for achado.
     ///
-    /// MVP: varre de 0 até head a cada chamada — barato em anvil/teste, e o filtro
-    /// é por tópico indexado (o nó não devolve o histórico inteiro). Em produção,
     /// rastrear a partir de um checkpoint evita a varredura completa.
     async fn creation_block(
         &self,
@@ -257,15 +197,11 @@ impl ChainVerifier for RpcVerifier {
         };
         let observed = observed_from_swap(&raw);
 
-        // sem trava ativa (inexistente/resgatada/reembolsada) → Absent, sem checar
-        // profundidade (não há o que confirmar).
+        // No active lock: nonexistent, withdrawn, or refunded. Return Absent.
         if !observed.exists {
             return Ok(LockObservation::Absent);
         }
 
-        // ativa → mede profundidade. confirmações = head − bloco_criação + 1
-        // (o bloco de inclusão conta como a 1ª). Sem o log de criação, não consigo
-        // PROVAR a profundidade → conservador: 0 confirmações (só passa se min=0).
         let head = self
             .provider
             .get_block_number()
@@ -300,7 +236,7 @@ mod tests {
 
     fn active_swap() -> RawSwap {
         RawSwap {
-            sender: a(0x3A),    // maker travou
+            sender: a(0x3A),    // maker locked
             recipient: a(0x7A), // paga o taker
             token: a(0x22),
             amount: 500,
@@ -333,7 +269,6 @@ mod tests {
         assert!(!o.exists);
     }
 
-    // --- exists = false: já resgatada ---
     #[test]
     fn withdrawn_swap_is_not_exists() {
         let mut s = active_swap();
@@ -341,7 +276,6 @@ mod tests {
         assert!(!observed_from_swap(&s).exists);
     }
 
-    // --- exists = false: já reembolsada ---
     #[test]
     fn refunded_swap_is_not_exists() {
         let mut s = active_swap();
@@ -349,15 +283,11 @@ mod tests {
         assert!(!observed_from_swap(&s).exists);
     }
 
-    // --- JUNÇÃO parsing → verificação: ObservedLock montado de uma resposta
     //     RPC mockada alimenta verify_counterparty_leg corretamente. ---
     #[test]
     fn parsed_lock_feeds_verification_safe() {
-        // resposta RPC mockada (a perna do maker, vista pelo taker)
         let observed = observed_from_swap(&active_swap());
 
-        // o taker espera: mesmo H, token/amount da compra, ele como recipient,
-        // sua perna longa (2000) vs a do maker (1800), gap 100 → Safe.
         let exp = LegExpectation {
             expected_hashlock: h(0xAB),
             expected_token: a(0x22),
@@ -376,7 +306,6 @@ mod tests {
 
     #[test]
     fn parsed_lock_feeds_verification_unsafe() {
-        // mesma trava, mas o hashlock observado difere do esperado → Unsafe.
         let mut s = active_swap();
         s.hashlock = h(0x01);
         let observed = observed_from_swap(&s);
@@ -397,7 +326,6 @@ mod tests {
         );
     }
 
-    // --- montagem de uma trava resgatada que vira LockNotFound na verificação ---
     #[test]
     fn withdrawn_lock_verifies_as_lock_not_found() {
         let mut s = active_swap();
@@ -419,9 +347,6 @@ mod tests {
         );
     }
 
-    // --- G2: for_gate() — só Confirmed vira trava observada; Shallow e Absent
-    //     viram None (a máquina espera). Garantia de que a distinção rasa/ausente
-    //     é só telemetria e NUNCA enfraquece o gate. ---
     #[test]
     fn for_gate_only_confirmed_is_observed() {
         let o = observed_from_swap(&active_swap());
@@ -431,13 +356,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // INTEGRAÇÃO REAL contra uma chain (anvil). Antes era um stub #[ignore]:
-    // os testes acima provam o PARSING/MONTAGEM, mas NÃO a leitura real de um nó.
     // Esta prova sobe anvil, faz deploy do HTLC, cria uma trava de verdade, e:
-    //   1. lê via RpcVerifier (leitura real, não mock);
-    //   2. alimenta verify_counterparty_leg → Safe (junção read→verify);
-    //   3. dirige a máquina de estados → RedeemCounterpartyLeg (read→decide).
-    // Fecha a costura leitura-real → verificação → decisão da carteira.
     // ----------------------------------------------------------------
     use crate::sm::{next_action, NextAction, SwapContext, SwapState};
     use alloy::network::EthereumWallet;
@@ -467,9 +386,8 @@ mod tests {
             .wallet(wallet)
             .connect_http(anvil.endpoint_url());
 
-        // --- deploy do HTLC e criação de uma trava REAL (a perna do maker) ---
         let htlc = HashedTimelock::deploy(provider.clone()).await.unwrap();
-        let me = [0x7Au8; 20]; // EU (taker): quem pode resgatar a perna do maker
+        let me = [0x7Au8; 20]; // ME (taker): who can redeem the maker leg
         let amount_u128: u128 = 500;
         let preimage = [0x42u8; 32];
         let hashlock = hashlock_from_preimage(&preimage);
@@ -506,7 +424,6 @@ mod tests {
         // === LEITURA REAL via RpcVerifier (o que o #[ignore] nunca provava) ===
         let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
         let htlc_addr: Address = (*htlc.address()).into_array();
-        // min_confirmations = 1: recém-minerada conta como 1 confirmação →
         // Confirmed (equivalente ao comportamento antigo de profundidade 0).
         let obs = match v.observe_lock(htlc_addr, cid.0, 1).await.unwrap() {
             LockObservation::Confirmed(o) => o,
@@ -521,20 +438,18 @@ mod tests {
         assert_eq!(obs.sender, sender.into_array());
         assert_eq!(obs.timelock, timelock_secs);
 
-        // === a leitura real alimenta a verificação (taker vê a perna do maker) ===
         let exp = LegExpectation {
             expected_hashlock: hashlock,
             expected_token: [0u8; 20],
             expected_amount: amount_u128,
             expected_recipient: me,
-            my_timelock: obs.timelock + 100, // minha perna (longa)
+            my_timelock: obs.timelock + 100, // my long leg
             min_gap: 50,
-            now: now_unix(), // bem antes da expiração → janela ok
+            now: now_unix(), // well before expiry: safe window
             role: Role::Taker,
         };
         assert_eq!(verify_counterparty_leg(&exp, &obs), VerifyOutcome::Safe);
 
-        // === e dirige a máquina de estados: read real → decisão de resgatar ===
         let ctx = SwapContext {
             role: Role::Taker,
             my_token: [0x11; 20],
@@ -558,23 +473,17 @@ mod tests {
             "a leitura real, verificada Safe, leva o taker a resgatar"
         );
 
-        // === negativo: um contractId inexistente lê como Absent ===
         let absent = v.observe_lock(htlc_addr, [0xFFu8; 32], 1).await.unwrap();
         assert_eq!(
             absent,
             LockObservation::Absent,
-            "trava inexistente → Absent"
+            "nonexistent lock -> Absent"
         );
-        // e Absent vira None no gate → a máquina ESPERA (não há trava a verificar).
         // (que um ObservedLock inexistente verifica como LockNotFound continua
-        // coberto pelo teste puro `withdrawn_lock_verifies_as_lock_not_found`.)
         assert_eq!(absent.for_gate(), None);
     }
 
     // ----------------------------------------------------------------
-    // PROFUNDIDADE (F4) contra anvil real: a MESMA trava lê como Shallow quando a
-    // profundidade exigida é maior que a disponível, e vira Confirmed quando a
-    // chain avança. Prova que o gate de N-confirmações funciona e se MOVE.
     // ----------------------------------------------------------------
     #[tokio::test]
     async fn observe_lock_depth_gate_shallow_then_confirmed() {
@@ -626,8 +535,7 @@ mod tests {
         let v = RpcVerifier::new(&anvil.endpoint()).unwrap();
         let htlc_addr: Address = (*htlc.address()).into_array();
 
-        // recém-minerada = 1 confirmação.
-        // min=0 e min=1 → Confirmed (equivalente ao comportamento antigo).
+        // min=0 and min=1 both mean Confirmed.
         assert!(matches!(
             v.observe_lock(htlc_addr, cid.0, 0).await.unwrap(),
             LockObservation::Confirmed(_)
@@ -636,14 +544,12 @@ mod tests {
             v.observe_lock(htlc_addr, cid.0, 1).await.unwrap(),
             LockObservation::Confirmed(_)
         ));
-        // min=2 → ainda RASA (só 1 confirmação disponível).
         assert_eq!(
             v.observe_lock(htlc_addr, cid.0, 2).await.unwrap(),
             LockObservation::Shallow,
-            "1 confirmação < 2 exigidas → Shallow"
+            "1 confirmation < 2 required: Shallow"
         );
 
-        // minera 1 bloco (auto-transferência) → 2 confirmações.
         let bump = TransactionRequest::default()
             .to(sender)
             .value(U256::from(0));
@@ -655,13 +561,13 @@ mod tests {
             .await
             .unwrap();
 
-        // a MESMA trava, agora 2-funda → min=2 vira Confirmed (o gate se moveu).
+        // The same lock now has depth 2, so min=2 becomes Confirmed.
         assert!(
             matches!(
                 v.observe_lock(htlc_addr, cid.0, 2).await.unwrap(),
                 LockObservation::Confirmed(_)
             ),
-            "após avançar a chain, 2 confirmações ≥ 2 exigidas → Confirmed"
+            "after advancing the chain, 2 confirmations >= 2 required: Confirmed"
         );
     }
 }

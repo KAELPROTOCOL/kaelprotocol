@@ -1,6 +1,3 @@
-//! Observação on-chain (alloy): lê os logs do HTLC numa faixa de blocos,
-//! decodifica os eventos e alimenta o [`SwapTracker`]. SEM chaves, SEM custódia.
-
 use crate::correlate::SwapTracker;
 use alloy::primitives::{Address, B256};
 use alloy::providers::Provider;
@@ -9,7 +6,6 @@ use alloy::sol;
 use alloy::sol_types::SolEvent;
 
 // Interface do HTLC lida do artefato do Foundry (ABI + bytecode para deploy).
-// O caminho é relativo à raiz do crate (CARGO_MANIFEST_DIR).
 sol! {
     #[sol(rpc)]
     HashedTimelock,
@@ -20,7 +16,6 @@ fn to32(b: B256) -> [u8; 32] {
     b.0
 }
 
-/// Lê os logs do contrato `address` na faixa `[from, to]`, decodifica e
 /// alimenta o tracker. Retorna quantos eventos relevantes foram processados.
 pub async fn poll_into_tracker<P: Provider>(
     provider: &P,
@@ -52,8 +47,6 @@ pub async fn poll_into_tracker<P: Provider>(
             tracker.on_redeem(chain_id, to32(ev.contractId), to32(ev.preimage));
             count += 1;
         } else if let Ok(ev) = HashedTimelock::LogRefund::decode_log(&primitive) {
-            // o hashlock não vem no LogRefund; resolvemos pelo contractId já
-            // conhecido no tracker (estado em memória, pequeno).
             if let Some(hashlock) = tracker.hashlock_of(chain_id, to32(ev.contractId)) {
                 tracker.on_refund(chain_id, to32(ev.contractId), hashlock);
             }

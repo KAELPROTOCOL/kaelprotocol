@@ -1,6 +1,3 @@
-//! Binário do servidor do livro de ordens (Parte 5).
-//! Toda a lógica HTTP vive em `orderbook::server`; aqui só fazemos o bind.
-
 use orderbook::server::{build_router, AppState};
 
 #[tokio::main]

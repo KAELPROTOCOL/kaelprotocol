@@ -1,18 +1,7 @@
-//! Verificação EIP-712 na borda — equivalente em Rust ao `Order.sol`.
-//!
-//! PONTO DE FUNDAÇÃO CRÍTICO: esta verificação DEVE recuperar o mesmo `maker`
-//! que o contrato recuperaria para a mesma ordem + assinatura. Divergência aqui
-//! é um furo silencioso (ordem aceita off-chain falharia on-chain). A
-//! equivalência é provada por um vetor de teste fixo (ver testes).
-//!
-//! Domínio CHAIN-AGNÓSTICO (ADR-005): `EIP712Domain(string name,string version)`
-//! — sem chainId, sem verifyingContract.
-
 use crate::order::Order;
 use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
 use sha3::{Digest, Keccak256};
 
-/// metade da ordem da curva secp256k1 (EIP-2). s acima disso é maleável.
 /// n/2 = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
 const SECP256K1_HALF_N: [u8; 32] = [
     0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -36,7 +25,6 @@ fn keccak(data: &[u8]) -> [u8; 32] {
     h.finalize().into()
 }
 
-/// abi.encode de um address: 12 bytes zero + 20 bytes do endereço.
 fn enc_addr(a: &[u8; 20], out: &mut Vec<u8>) {
     out.extend_from_slice(&[0u8; 12]);
     out.extend_from_slice(a);
@@ -90,7 +78,6 @@ pub fn hash_struct(o: &Order) -> [u8; 32] {
     keccak(&buf)
 }
 
-/// digest EIP-712 = keccak(0x1901 ‖ domainSeparator ‖ hashStruct)
 pub fn digest(o: &Order) -> [u8; 32] {
     let mut buf = Vec::with_capacity(2 + 32 + 32);
     buf.extend_from_slice(&[0x19, 0x01]);
@@ -99,7 +86,6 @@ pub fn digest(o: &Order) -> [u8; 32] {
     keccak(&buf)
 }
 
-/// Deriva o endereço Ethereum (20 bytes) de uma VerifyingKey.
 fn address_of(vk: &VerifyingKey) -> [u8; 20] {
     let point = vk.to_encoded_point(false); // descomprimido: 0x04 ‖ X ‖ Y
     let bytes = point.as_bytes();
@@ -109,9 +95,6 @@ fn address_of(vk: &VerifyingKey) -> [u8; 20] {
     addr
 }
 
-/// Verifica a assinatura do maker e a validade temporal.
-/// `signature` é `r ‖ s ‖ v` (65 bytes), idêntico ao formato do contrato.
-/// Retorna o digest EIP-712 (chave canônica para rastrear nonce).
 pub fn verify(o: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyError> {
     if signature.len() != 65 {
         return Err(VerifyError::BadSignatureLength);
@@ -130,7 +113,7 @@ pub fn verify(o: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyE
 
     let sig =
         Signature::from_slice(signature[0..64].as_ref()).map_err(|_| VerifyError::BadSignature)?;
-    let _ = r; // r/s já estão dentro de `sig`; mantidos acima para clareza
+    let _ = r; // r/s are already inside `sig`; kept above for clarity
     let recid = RecoveryId::from_byte(v - 27).ok_or(VerifyError::InvalidV)?;
 
     let dig = digest(o);
@@ -138,11 +121,6 @@ pub fn verify(o: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyE
         .map_err(|_| VerifyError::BadSignature)?;
     let signer = address_of(&vk);
 
-    // PARIDADE Rust↔Solidity: uma assinatura com r=0 é REJEITADA em ambos (propriedade de segurança intacta).
-    // Os rótulos diferem: Solidity recupera address(0) e reverte ZeroSigner; Rust rejeita antes em
-    // Signature::from_slice e retorna BadSignature. A variante ZeroSigner abaixo é defensiva/inalcançável
-    // com k256 atual. Divergência cosmética, sem efeito de consenso (o que importa: ambos rejeitam).
-    // Ver teste eip712::tests::zero_r_signature_is_rejected.
     if signer == [0u8; 20] {
         return Err(VerifyError::ZeroSigner);
     }
@@ -155,24 +133,19 @@ pub fn verify(o: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyE
     Ok(dig)
 }
 
-/// s é maior que n/2? (comparação big-endian byte a byte)
 fn is_high_s(s: &[u8]) -> bool {
     s > &SECP256K1_HALF_N[..]
 }
 
-/// Deriva o endereço Ethereum (20 bytes) de uma chave privada (32 bytes).
 pub fn address_from_private_key(private_key: &[u8; 32]) -> [u8; 20] {
-    let sk = SigningKey::from_slice(private_key).expect("chave privada inválida");
+    let sk = SigningKey::from_slice(private_key).expect("invalid private key");
     address_of(sk.verifying_key())
 }
 
-/// Assina a ordem com `private_key` (32 bytes), produzindo `r‖s‖v` (65 bytes)
-/// no mesmo formato que o contrato consome. k256 normaliza para low-s, então a
-/// assinatura sempre passa o endurecimento ECDSA. Útil para testes e clientes.
 pub fn sign(o: &Order, private_key: &[u8; 32]) -> [u8; 65] {
-    let sk = SigningKey::from_slice(private_key).expect("chave privada inválida");
+    let sk = SigningKey::from_slice(private_key).expect("invalid private key");
     let dig = digest(o);
-    let (sig, recid) = sk.sign_prehash_recoverable(&dig).expect("falha ao assinar");
+    let (sig, recid) = sk.sign_prehash_recoverable(&dig).expect("signing failed");
     let mut out = [0u8; 65];
     out[..64].copy_from_slice(&sig.to_bytes());
     out[64] = 27 + recid.to_byte();
@@ -197,7 +170,6 @@ mod tests {
         a
     }
 
-    /// Ordem do vetor fixo (vectors/eip712_order.json), idêntica à de Vector.t.sol.
     fn vector_order() -> Order {
         Order {
             maker: addr("0x06884b215DE85bE18f99a04d05108524Edc88d82"),
@@ -225,7 +197,6 @@ mod tests {
         sig
     }
 
-    // EQUIVALÊNCIA on-chain/off-chain: os hashes intermediários batem com Solidity.
     #[test]
     fn domain_separator_matches_solidity() {
         assert_eq!(
@@ -250,7 +221,6 @@ mod tests {
         );
     }
 
-    // CONSISTÊNCIA: a verificação recupera o MESMO maker do vetor.
     #[test]
     fn verify_recovers_vector_maker() {
         let o = vector_order();
@@ -261,7 +231,7 @@ mod tests {
     #[test]
     fn tampered_order_rejected() {
         let mut o = vector_order();
-        o.buy_amount = 9999; // adultera após assinar
+        o.buy_amount = 9999; // tampered after signing
         assert_eq!(
             verify(&o, &vector_signature(), 1_000_000_000),
             Err(VerifyError::SignerNotMaker)
@@ -277,8 +247,6 @@ mod tests {
         );
     }
 
-    // O assinador Rust produz uma assinatura que verifica e recupera o maker
-    // da chave privada do vetor — fecha o ciclo sign→verify.
     #[test]
     fn sign_then_verify_roundtrip() {
         let pk = b32("0x00000000000000000000000000000000000000000000000000000000c0ffee01");
@@ -287,16 +255,12 @@ mod tests {
         assert_eq!(verify(&o, &sig, 1_000_000_000), Ok(digest(&o)));
     }
 
-    // ===== GRUPO 1 — paridade do endurecimento ECDSA (lado Rust) =====
-
-    // ordem completa da curva secp256k1 (n).
     const SECP256K1_N: [u8; 32] = [
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
         0xFF, 0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36,
         0x41, 0x41,
     ];
 
-    // subtração big-endian de 32 bytes (a >= b), usada para s -> n - s.
     fn sub_be(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
         let mut out = [0u8; 32];
         let mut borrow: i16 = 0;
@@ -333,16 +297,14 @@ mod tests {
         );
     }
 
-    // v inválido (fora de {27,28}); deve dar InvalidV.
     #[test]
     fn invalid_v_rejected() {
         let o = vector_order();
         let mut sig = vector_signature();
-        sig[64] = 29; // v inválido
+        sig[64] = 29; // invalid v
         assert_eq!(verify(&o, &sig, 1_000_000_000), Err(VerifyError::InvalidV));
     }
 
-    // comprimento errado (≠ 65); deve dar BadSignatureLength.
     #[test]
     fn bad_length_rejected() {
         let o = vector_order();
@@ -353,27 +315,18 @@ mod tests {
         );
     }
 
-    // r = 0: o ponto do teste é provar que essa assinatura é REJEITADA, não
-    // qual rótulo de erro sai.
     //
-    // PARIDADE Rust↔Solidity: uma assinatura com r=0 é REJEITADA em ambos (propriedade de segurança intacta).
-    // Os rótulos diferem: Solidity recupera address(0) e reverte ZeroSigner; Rust rejeita antes em
-    // Signature::from_slice e retorna BadSignature. A variante ZeroSigner no Rust é defensiva/inalcançável
-    // com k256 atual. Divergência cosmética, sem efeito de consenso (o que importa: ambos rejeitam).
     #[test]
     fn zero_r_signature_is_rejected() {
         let o = vector_order();
         let base = vector_signature();
         let mut sig = Vec::with_capacity(65);
         sig.extend_from_slice(&[0u8; 32]); // r = 0
-        sig.extend_from_slice(&base[32..64]); // s (low, válido)
+        sig.extend_from_slice(&base[32..64]); // s (low, valid)
         sig.push(27);
 
         let result = verify(&o, &sig, 1_000_000_000);
-        // 1) propriedade que importa: r=0 é rejeitado (qualquer Err serve).
         assert!(result.is_err(), "r=0 deve ser rejeitado, veio: {result:?}");
-        // 2) divergência documentada: no Rust o rótulo é BadSignature (k256 erra
-        //    em Signature::from_slice antes da recuperação), NÃO ZeroSigner.
         assert_eq!(result, Err(VerifyError::BadSignature));
     }
 }

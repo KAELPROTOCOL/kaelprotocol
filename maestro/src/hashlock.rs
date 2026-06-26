@@ -1,9 +1,5 @@
-//! Fonte ÚNICA da regra de hashlock do protocolo.
 //!
-//! O hashlock é SHA-256 do preimage — NÃO keccak256. Esta é a mesma regra do
-//! contrato (`sha256(abi.encodePacked(preimage))`) e DEVE ser a única usada por
 //! todo o maestro e seus testes. Centralizar evita o bug silencioso de indexar
-//! swaps pela chave errada.
 
 use sha2::{Digest, Sha256};
 

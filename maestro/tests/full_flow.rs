@@ -1,14 +1,10 @@
-//! Parte 6 — FLUXO COMPLETO (MVP demonstrável, EVM↔EVM).
 //!
-//! Une as peças num só fluxo, exatamente como o protocolo opera:
 //!   1. Dois makers ASSINAM ordens espelhadas (Camada 2) e enviam ao SERVIDOR
 //!      do livro (Camada 3), que VERIFICA na borda e CASA o par.
-//!   2. As CARTEIRAS liquidam via HTLC (Camada 1) em duas chains: trava em A →
-//!      trava em B (mesmo hashlock) → resgate em B revela o segredo → resgate
+//!   2. Wallets settle through HTLCs on two chains.
 //!      em A.
 //!   3. O MAESTRO (Camada 4) observa as duas chains e correlaciona o swap.
 //!
-//! INVARIANTE provado: em nenhum momento o servidor ou o maestro tocam fundos.
 
 use alloy::network::EthereumWallet;
 use alloy::node_bindings::Anvil;
@@ -110,7 +106,6 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         "o livro deveria informar 1 par"
     );
 
-    // ===== ETAPA 2: liquidação via HTLC (on-chain, conduzida pelas carteiras) =====
     let (_anvil_a, prov_a, wallet_a) = spawn_chain(CHAIN_A).await;
     let (_anvil_b, prov_b, wallet_b) = spawn_chain(CHAIN_B).await;
     let htlc_a = HashedTimelock::deploy(prov_a.clone()).await.unwrap();
@@ -144,7 +139,6 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         .await
         .unwrap();
 
-    // resgate em B revela o preimage
     let cid_b: B256 = htlc_b
         .computeContractId(wallet_b, wallet_a, Address::ZERO, amount, hl, tl_b)
         .call()
@@ -158,7 +152,6 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         .get_receipt()
         .await
         .unwrap();
-    // resgate em A usando o preimage revelado
     let cid_a: B256 = htlc_a
         .computeContractId(wallet_a, wallet_b, Address::ZERO, amount, hl, tl_a)
         .call()
@@ -195,14 +188,11 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         "preimage capturado"
     );
 
-    // ambas as pernas resgatadas → swap concluído nas duas chains
     let s = tracker.get(&hashlock).unwrap();
     assert!(
         s.legs.iter().all(|l| l.redeemed),
         "ambas as pernas resgatadas"
     );
-
-    // o swap completou sem que servidor ou maestro tocassem fundos.
 }
 
 async fn spawn_chain(
@@ -222,7 +212,6 @@ async fn spawn_chain(
     (anvil, provider, sender)
 }
 
-// --- cliente HTTP mínimo sobre TcpStream ---
 async fn http_post(url: &str, body: &serde_json::Value) -> (u16, String) {
     http_request("POST", url, Some(body)).await
 }

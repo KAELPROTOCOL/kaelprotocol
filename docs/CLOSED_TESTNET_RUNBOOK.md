@@ -1,6 +1,6 @@
 # Closed Developer Testnet Runbook
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 This runbook is for a closed developer testnet only. It is not production readiness, mainnet readiness, or approval to use real funds.
 

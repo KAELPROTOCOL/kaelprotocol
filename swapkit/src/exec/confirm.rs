@@ -1,17 +1,10 @@
-//! Peça 4 (lado das MINHAS ações): profundidade de confirmação de uma tx que EU
 //! enviei (lock/redeem/refund), identificada pelo `tx_hash`.
 //!
-//! CONVENÇÃO ÚNICA: reusa [`crate::chain::confirmations`] (`head − bloco + 1`) —
-//! exatamente a mesma da leitura da perna oposta ([`crate::chain::RpcVerifier::observe_lock`]).
-//! Não existe uma segunda noção de profundidade no código: as duas pontas (minhas
-//! txs e a trava da contraparte) contam confirmações da mesma forma.
 
 use crate::chain::{confirmations, ChainError};
 use alloy::primitives::B256;
 use alloy::providers::Provider;
 
-/// Confirmações da tx `tx_hash`. `0` se ela ainda não foi minerada (sem recibo ou
-/// sem bloco) — o chamador trata isso como "ainda não confirmada".
 pub async fn confirmations_of<P: Provider>(
     provider: &P,
     tx_hash: [u8; 32],
@@ -22,7 +15,7 @@ pub async fn confirmations_of<P: Provider>(
         .map_err(|e| ChainError::Rpc(format!("{e}")))?;
     let block = match receipt.and_then(|r| r.block_number) {
         Some(b) => b,
-        None => return Ok(0), // ainda na mempool / não minerada
+        None => return Ok(0), // still in mempool or not mined
     };
     let head = provider
         .get_block_number()
@@ -31,8 +24,6 @@ pub async fn confirmations_of<P: Provider>(
     Ok(confirmations(head, block))
 }
 
-/// `true` se a tx tem profundidade ≥ `min_confirmations`. É uma consulta de uma
-/// vez; o LAÇO do executor (peça 5) re-checa a cada iteração até confirmar.
 pub async fn is_confirmed<P: Provider>(
     provider: &P,
     tx_hash: [u8; 32],
@@ -64,8 +55,6 @@ mod tests {
             .as_secs()
     }
 
-    // Mesma convenção da peça 2: tx recém-minerada = 1 confirmação; o gate sobe
-    // quando a chain avança. Prova a unidade de noção de profundidade.
     #[tokio::test]
     async fn depth_of_my_tx_matches_piece2_convention() {
         let anvil = Anvil::new().spawn();
@@ -94,12 +83,10 @@ mod tests {
         .unwrap();
 
         let p = signer.provider();
-        // recém-minerada = 1 confirmação.
         assert_eq!(confirmations_of(p, locked.tx_hash).await.unwrap(), 1);
         assert!(is_confirmed(p, locked.tx_hash, 1).await.unwrap());
         assert!(!is_confirmed(p, locked.tx_hash, 2).await.unwrap());
 
-        // minera 1 bloco → 2 confirmações → o gate de 2 passa.
         let bump = TransactionRequest::default()
             .to(me.into())
             .value(U256::from(0));
@@ -113,7 +100,6 @@ mod tests {
         assert!(is_confirmed(p, locked.tx_hash, 2).await.unwrap());
     }
 
-    // tx desconhecida → 0 confirmações (não minerada), sem erro.
     #[tokio::test]
     async fn unknown_tx_has_zero_confirmations() {
         let anvil = Anvil::new().spawn();
