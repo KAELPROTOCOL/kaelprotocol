@@ -17,11 +17,12 @@ locks through Settlement (see `docs/DEV_TEST_RUNBOOK.md` and `docs/ESTADO.md`).
 | 1 | HTLC (`HashedTimelock.sol`) | `contracts/` | 12 tests |
 | 2 | EIP-712 signed order (`Order.sol`) | `contracts/` | 10 tests |
 | 3 | Settlement (`Settlement.sol`) | `contracts/` | 22 tests |
+| 3a | Mainnet-readiness fuzz (`MainnetReadinessFuzz.t.sol`) | `contracts/` | 4 fuzz tests |
 | 4 | Matching + orderbook server | `orderbook/` | 26 tests |
 | 5 | Maestro observer/correlation | `maestro/` | 9 tests (2 anvils) |
-| 6 | Swapkit verification + state machine + local executor | `swapkit/` | 66 tests (real anvil + executor e2e) |
+| 6 | Swapkit verification + state machine + local executor | `swapkit/` | 70 tests (real anvil + executor e2e + property tests) |
 
-**Total: 146 passing tests, 0 ignored** (45 Foundry + 101 Rust).
+**Total: 154 passing tests, 0 ignored** (49 Foundry + 105 Rust).
 
 > **State honesty:** the pieces above are proven in isolation and in selected
 > real joins: orderbook match, HTLC lock correlation in maestro, chain read to

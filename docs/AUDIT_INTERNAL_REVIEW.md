@@ -27,10 +27,10 @@ Baseline contract and Rust tests pass. The main blocker is not an existing broke
 |---|---:|---|
 | `pwd && whoami && git branch --show-current && git status --short && git log --oneline -5` | Pass | Environment confirmed. |
 | `rg --files` | Pass | Structure mapped. |
-| `cargo test --workspace` | Pass | 101 Rust tests passed after Settlement ERC-20 executor coverage. |
+| `cargo test --workspace` | Pass | 105 Rust tests passed after Settlement ERC-20 executor and mainnet-readiness property coverage. |
 | `cargo fmt --all -- --check` | Pass | `rustfmt` installed and formatting applied. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass | `clippy` installed; warnings fixed. |
-| `cd contracts && forge test` | Pass | 36 Foundry tests passed. |
+| `cd contracts && forge test` | Pass | 49 Foundry tests passed after fuzz coverage. |
 
 ## Components Audited
 

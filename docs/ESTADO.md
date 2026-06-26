@@ -13,9 +13,9 @@
 
 ## 1. Built And Tested
 
-**Total: 146 passing tests, 0 ignored** (45 Foundry + 101 Rust).
+**Total: 154 passing tests, 0 ignored** (49 Foundry + 105 Rust).
 
-### Contracts (Foundry) - 45 tests
+### Contracts (Foundry) - 49 tests
 
 | Suite | Tests | Coverage |
 |---|---:|---|
@@ -23,6 +23,7 @@
 | `Order.t.sol` | 10 | EIP-712 valid/invalid/expired signatures and ECDSA hardening |
 | `Settlement.t.sol` | 22 | Approach A settlement: authorization+nonce, chain binding, maker-only ETH/ERC-20 paths, replay, maker refund, non-custody, HTLC contractId binding for recipient/hashlock/timelock, invalid local leg rollback, ERC-20 EOA rejection, and insufficient allowance rejection |
 | `Vector.t.sol` | 1 | Emits the on-chain/off-chain EIP-712 equivalence vector |
+| `MainnetReadinessFuzz.t.sol` | 4 | Fuzz/property coverage for HTLC field binding, no redeem without valid preimage, OrderLib binding, and exact Settlement native lock invariants |
 
 ### `orderbook` (Rust) - 26 tests
 
@@ -38,7 +39,7 @@
   expiry watchdog.
 - `full_flow` (1): capstone orderbook to settlement to maestro flow.
 
-### `swapkit` (Rust) - 66 tests, 0 ignored
+### `swapkit` (Rust) - 70 tests, 0 ignored
 
 - `verify` (19): counterparty-leg verification for hashlock, token, amount,
   recipient, asymmetric role timelock gap, and the absolute `now + min_gap`
@@ -54,6 +55,9 @@
   Includes a direct HTLC local e2e over two anvils; the closed local runner now
   locks/refunds through `Settlement` while observing and redeeming through the
   canonical HTLC, including an ERC-20 Settlement lock with exact allowance.
+- `mainnet_readiness_properties` (4): property-style coverage for verifier
+  single-field mutation rejection, no secret reveal against unsafe legs, no maker
+  lock against unsafe legs, and complementary handshake role assignment.
 - `scripts/run_private_testnet_full.sh`: local/private mainnet-like gate that
   deploys HTLC, Settlement, and ERC-20 test tokens; validates chain IDs,
   bytecode, gas, balances, allowances, and confirmations; runs direct HTLC
@@ -106,10 +110,10 @@
 ## Test Count Summary
 
 ```text
-Foundry  : 45 tests  (HashedTimelock 12, Order 10, Settlement 22, Vector 1)
+Foundry  : 49 tests  (HashedTimelock 12, Order 10, Settlement 22, Vector 1, Fuzz 4)
 orderbook: 26 tests  (lib 25 + integration 1)
 maestro  :  9 tests  (lib 6 + e2e 2 + full_flow 1)
-swapkit  : 66 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 21, incl. real anvil)
+swapkit  : 70 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 21 + properties 4, incl. real anvil)
 ---------------------------------------------------------------
-TOTAL    : 146 passing, 0 ignored
+TOTAL    : 154 passing, 0 ignored
 ```
