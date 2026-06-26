@@ -144,7 +144,9 @@ The script writes logs to `/tmp/kael-private-testnet-full/` and:
 - runs the guarded Settlement native swap;
 - mints local test ERC-20 balances and runs the guarded Settlement ERC-20 swap;
 - verifies post-swap ERC-20 allowances are zero;
-- proves expected operational failures for missing send confirmation and invalid token bytecode.
+- proves expected operational failures for missing send confirmation, EOA HTLC,
+  EOA Settlement, invalid ERC-20 token bytecode, and missing cross-chain gas on
+  both signers.
 
 Passing output includes:
 

@@ -13,13 +13,13 @@
 
 ## 1. Built And Tested
 
-**Total: 143 passing tests, 0 ignored** (42 Foundry + 101 Rust).
+**Total: 146 passing tests, 0 ignored** (45 Foundry + 101 Rust).
 
-### Contracts (Foundry) - 42 tests
+### Contracts (Foundry) - 45 tests
 
 | Suite | Tests | Coverage |
 |---|---:|---|
-| `HashedTimelock.t.sol` | 9 | HTLC lock/redeem/refund, wrong preimage, double redeem, redeem after expiry, creation guards |
+| `HashedTimelock.t.sol` | 12 | HTLC lock/redeem/refund, wrong preimage, double redeem, double refund, redeem after refund, refund after redeem, redeem after expiry, creation guards |
 | `Order.t.sol` | 10 | EIP-712 valid/invalid/expired signatures and ECDSA hardening |
 | `Settlement.t.sol` | 22 | Approach A settlement: authorization+nonce, chain binding, maker-only ETH/ERC-20 paths, replay, maker refund, non-custody, HTLC contractId binding for recipient/hashlock/timelock, invalid local leg rollback, ERC-20 EOA rejection, and insufficient allowance rejection |
 | `Vector.t.sol` | 1 | Emits the on-chain/off-chain EIP-712 equivalence vector |
@@ -58,7 +58,8 @@
   deploys HTLC, Settlement, and ERC-20 test tokens; validates chain IDs,
   bytecode, gas, balances, allowances, and confirmations; runs direct HTLC
   primitive coverage; runs native and ERC-20 Settlement swaps; and checks
-  expected operational failures.
+  expected operational failures for missing send confirmation, EOA HTLC, EOA
+  Settlement, invalid ERC-20 token, and missing cross-chain gas on both signers.
 
 ---
 
@@ -105,10 +106,10 @@
 ## Test Count Summary
 
 ```text
-Foundry  : 42 tests  (HashedTimelock 9, Order 10, Settlement 22, Vector 1)
+Foundry  : 45 tests  (HashedTimelock 12, Order 10, Settlement 22, Vector 1)
 orderbook: 26 tests  (lib 25 + integration 1)
 maestro  :  9 tests  (lib 6 + e2e 2 + full_flow 1)
 swapkit  : 66 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 21, incl. real anvil)
 ---------------------------------------------------------------
-TOTAL    : 143 passing, 0 ignored
+TOTAL    : 146 passing, 0 ignored
 ```

@@ -205,6 +205,17 @@ mint_token() {
   pass "$label minted $amount test tokens"
 }
 
+set_native_balance() {
+  local rpc="$1"
+  local address="$2"
+  local amount="$3"
+  local label="$4"
+  local hex_amount
+  hex_amount="$(cast to-hex "$amount")"
+  cast rpc --rpc-url "$rpc" anvil_setBalance "$address" "$hex_amount" >/dev/null
+  pass "$label native balance set to $amount"
+}
+
 expect_failure() {
   local label="$1"
   shift
@@ -329,8 +340,18 @@ assert_allowance "$KAEL_RPC_B" "$TOKEN_B" "$SIGNER_B_ADDRESS" "$KAEL_SETTLEMENT_
 
 stage "Run expected operational failures"
 expect_failure "swap without explicit confirmation" ./scripts/run_closed_testnet_swap.sh
+KAEL_HTLC_A="$SIGNER_A_ADDRESS" \
+  expect_failure "preflight rejects EOA HTLC" ./scripts/run_closed_testnet_preflight.sh
+KAEL_CLOSED_TESTNET_SEND_TX=I_UNDERSTAND_THIS_USES_TEST_FUNDS \
+  KAEL_SETTLEMENT_A="$SIGNER_A_ADDRESS" \
+  expect_failure "swap rejects EOA Settlement" ./scripts/run_closed_testnet_swap.sh
 KAEL_TOKEN_A="0x000000000000000000000000000000000000dEaD" \
   expect_failure "preflight rejects invalid token" ./scripts/run_closed_testnet_preflight.sh
+set_native_balance "$KAEL_RPC_B" "$SIGNER_A_ADDRESS" "0" "signer A on chain B"
+expect_failure "preflight rejects signer A missing cross-chain gas" ./scripts/run_closed_testnet_preflight.sh
+set_native_balance "$KAEL_RPC_B" "$SIGNER_A_ADDRESS" "10000000000000000000000" "signer A on chain B"
+set_native_balance "$KAEL_RPC_A" "$SIGNER_B_ADDRESS" "0" "signer B on chain A"
+expect_failure "preflight rejects signer B missing cross-chain gas" ./scripts/run_closed_testnet_preflight.sh
 
 echo
 echo "PRIVATE TESTNET FULL PASS"

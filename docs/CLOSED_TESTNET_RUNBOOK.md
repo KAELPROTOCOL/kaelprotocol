@@ -97,8 +97,9 @@ This starts two private local chains, deploys `HashedTimelock`, `Settlement`,
 and test `MockERC20` tokens, validates bytecode, chain IDs, gas, native balances,
 ERC-20 balances, allowances, and confirmations, runs preflight, runs the direct
 HTLC native primitive test, runs Settlement native and Settlement ERC-20 swaps,
-and verifies expected operational failures. Logs are written to
-`/tmp/kael-private-testnet-full/`.
+and verifies expected operational failures for missing send confirmation, EOA
+HTLC, EOA Settlement, invalid ERC-20 token, and missing cross-chain gas on both
+signers. Logs are written to `/tmp/kael-private-testnet-full/`.
 
 Passing output includes:
 

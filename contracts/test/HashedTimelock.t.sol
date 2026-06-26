@@ -67,6 +67,17 @@ contract HashedTimelockTest is Test {
         htlc.redeem(id, preimage);
     }
 
+    function test_RefundAfterRedeem_Reverts() public {
+        vm.prank(sender);
+        bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
+
+        htlc.redeem(id, preimage);
+        vm.warp(timelock + 1);
+        vm.prank(sender);
+        vm.expectRevert(HashedTimelock.AlreadyWithdrawn.selector);
+        htlc.refund(id);
+    }
+
     // 5) Refund before the deadline reverts.
     function test_RefundBeforeTimelock_Reverts() public {
         vm.prank(sender);
@@ -88,6 +99,31 @@ contract HashedTimelockTest is Test {
         htlc.refund(id);
         assertEq(sender.balance, balBefore + 1 ether);
         assertTrue(htlc.getSwap(id).refunded);
+    }
+
+    function test_DoubleRefund_Reverts() public {
+        vm.prank(sender);
+        bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
+
+        vm.warp(timelock + 1);
+        vm.prank(sender);
+        htlc.refund(id);
+
+        vm.prank(sender);
+        vm.expectRevert(HashedTimelock.AlreadyRefunded.selector);
+        htlc.refund(id);
+    }
+
+    function test_RedeemAfterRefund_Reverts() public {
+        vm.prank(sender);
+        bytes32 id = htlc.newSwap{value: 1 ether}(recipient, address(0), 1 ether, hashlock, timelock);
+
+        vm.warp(timelock + 1);
+        vm.prank(sender);
+        htlc.refund(id);
+
+        vm.expectRevert(HashedTimelock.AlreadyRefunded.selector);
+        htlc.redeem(id, preimage);
     }
 
     // 7) Refund by a non-sender reverts.
