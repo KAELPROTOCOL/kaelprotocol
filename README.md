@@ -20,9 +20,9 @@ locks through Settlement (see `docs/DEV_TEST_RUNBOOK.md` and `docs/ESTADO.md`).
 | 3a | Mainnet-readiness fuzz (`MainnetReadinessFuzz.t.sol`) | `contracts/` | 4 fuzz tests |
 | 4 | Matching + orderbook server | `orderbook/` | 26 tests |
 | 5 | Maestro observer/correlation | `maestro/` | 9 tests (2 anvils) |
-| 6 | Swapkit verification + state machine + local executor | `swapkit/` | 70 tests (real anvil + executor e2e + property tests) |
+| 6 | Swapkit verification + state machine + local executor | `swapkit/` | 71 tests (real anvil + executor e2e + property tests) |
 
-**Total: 154 passing tests, 0 ignored** (49 Foundry + 105 Rust).
+**Total: 155 passing tests, 0 ignored** (49 Foundry + 106 Rust).
 
 > **State honesty:** the pieces above are proven in isolation and in selected
 > real joins: orderbook match, HTLC lock correlation in maestro, chain read to

@@ -29,6 +29,7 @@ Last updated: 2026-06-25
 - Mainnet-like private testnet runner added at `scripts/run_private_testnet_full.sh`, with native Settlement, ERC-20 Settlement, direct HTLC primitive coverage, bytecode/gas/balance/allowance checks, and expected operational failures.
 - Adversarial coverage added for direct HTLC terminal-state conflicts and private-testnet operational failures covering EOA HTLC, EOA Settlement, invalid ERC-20 token, missing send confirmation, and missing cross-chain gas for each signer.
 - Fuzz and property coverage added in `contracts/test/MainnetReadinessFuzz.t.sol` and `swapkit/tests/mainnet_readiness_properties.rs`.
+- Defensive hardening added to redact secrets from `NextAction` debug output and remove `Debug` from `SwapContext`.
 
 ## Current Milestone
 

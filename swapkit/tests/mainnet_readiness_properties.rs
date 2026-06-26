@@ -206,3 +206,12 @@ fn handshake_roles_are_complementary_for_arrival_and_digest_ties_property() {
         assert_ne!(assign_role(&left, &right), assign_role(&right, &left));
     }
 }
+
+#[test]
+fn redeem_action_debug_redacts_secret_property() {
+    let secret = h(0x5E);
+    let rendered = format!("{:?}", NextAction::RedeemCounterpartyLeg { secret });
+    assert!(rendered.contains("<redacted>"));
+    assert!(!rendered.contains("5e"));
+    assert!(!rendered.contains("94"));
+}

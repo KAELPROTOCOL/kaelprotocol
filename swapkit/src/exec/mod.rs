@@ -39,8 +39,8 @@ impl Clock for SystemClock {
     fn now(&self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("system clock before unix epoch")
-            .as_secs()
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0)
     }
 }
 
