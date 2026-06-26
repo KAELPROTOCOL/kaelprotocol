@@ -17,7 +17,7 @@ Baseline contract and Rust tests pass. The main blocker is not an existing broke
 - Recent commits:
   - `bdef5ac executor: pecas 1-4 (signer + guard, tx, observe, confirm)`
   - `ecafa36 handshake: regra de papeis Taker/Maker + derivacao do SwapContext`
-  - `2f0ede6 Endurece seguranca da carteira, liquidador e caminho servido (lote cirurgico)`
+  - `2f0ede6 Harden wallet safety, settlement, and served path`
   - `30897a2 docs: consolida ADRs (DECISIONS.md) e estado do projeto (ESTADO.md)`
   - `a0045d1 swapkit: ChainVerifier (trait) + RpcVerifier (alloy) — leitura da outra chain`
 
@@ -53,7 +53,7 @@ No Critical findings are open from the audited code paths. Existing gates preven
 - Severity: High
 - Component: `swapkit/src/exec/mod.rs`
 - Description: The executor exports signer, tx, observe, and confirm modules, but has no `step()`/`run()` orchestration.
-- Impact: The project cannot yet reach the development milestone "swap local rodando pela carteira"; users must still manually compose primitives.
+- Impact: The project could not yet reach the development milestone "wallet-driven local swap"; users still had to manually compose primitives.
 - Evidence: `swapkit/src/exec/mod.rs` only declares submodules and documents piece 5 as pending.
 - Test: Absent before this review.
 - Recommendation: Implement `Clock`, `step()`, `run()`, idempotent state advancement, and anti-TOCTOU re-verification before lock/redeem.
@@ -120,15 +120,15 @@ No Critical findings are open from the audited code paths. Existing gates preven
 
 ### Informational
 
-#### KAEL-I-001: Settlement is not part of the first local executor e2e
+#### KAEL-I-001: Settlement was not part of the first local executor e2e
 
 - Severity: Informational
 - Component: `contracts/src/Settlement.sol`, e2e design
-- Description: The first development e2e should use direct HTLC native ETH as requested. Settlement remains tested independently.
-- Impact: Keeps the wallet milestone scoped and avoids pretending Settlement is integrated into a complete production route.
-- Evidence: `Settlement.t.sol` passes independently.
-- Test: Foundry coverage exists.
-- Recommendation: Keep this explicit in the runbook.
+- Description: The first development e2e used direct HTLC native ETH as requested. Settlement is now integrated into the closed developer testnet runner while the direct HTLC e2e remains as primitive coverage.
+- Impact: The real closed-testnet path now locks and refunds through Settlement and continues to observe/redeem against the canonical HTLC.
+- Evidence: `Settlement.t.sol` passes independently; the closed-testnet runner now requires `KAEL_SETTLEMENT_A/B`.
+- Test: `./scripts/run_dev_swap_test.sh`, `./scripts/run_closed_testnet_local.sh`, and Foundry coverage.
+- Recommendation: Keep direct HTLC coverage as primitive-level testing; use the Settlement-mediated runner for closed testnet.
 - Status: fixed
 
 ## Risk Matrix

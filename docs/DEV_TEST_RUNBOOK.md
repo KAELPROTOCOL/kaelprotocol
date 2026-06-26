@@ -12,8 +12,8 @@ Safety rules:
 - no real funds;
 - only local Anvil or closed developer testnet RPCs allowed by the signer allowlist;
 - no removal of the `KAEL_CLOSED_TESTNET_SEND_TX` confirmation gate;
-- direct HTLC/native ETH only for the closed-testnet runner;
-- no `Settlement`, ERC-20, p2p, bridge, oracle, or custody in this runner.
+- Settlement-mediated native ETH HTLC only for the closed-testnet runner;
+- no ERC-20, p2p, bridge, oracle, or custody in this runner.
 
 ## Prerequisites
 
@@ -29,12 +29,12 @@ Command:
 ./scripts/run_dev_swap_test.sh
 ```
 
-This is the original development milestone. It runs Foundry contract tests and the focused wallet-led Rust e2e with two local Anvil chains.
+This runs Foundry contract tests, the focused wallet-led direct HTLC Rust e2e, and the local closed-testnet Settlement flow.
 
 Success means the command exits with code `0` and prints:
 
 ```text
-Marco de desenvolvimento atingido: swap local rodando pela carteira.
+Development milestone reached: wallet-driven local swap through Settlement.
 ```
 
 ## 2. Closed Testnet With Developer RPCs
@@ -56,6 +56,8 @@ export KAEL_CHAIN_A="..."
 export KAEL_CHAIN_B="..."
 export KAEL_HTLC_A="..."
 export KAEL_HTLC_B="..."
+export KAEL_SETTLEMENT_A="..."
+export KAEL_SETTLEMENT_B="..."
 export KAEL_SIGNER_KEY_A="..."
 export KAEL_SIGNER_KEY_B="..."
 export KAEL_AMOUNT_A_WEI="1000000000000000"
@@ -90,7 +92,7 @@ The script:
 - starts two local Anvil chains:
   - chain A: `127.0.0.1:8545`, chain id `31337`;
   - chain B: `127.0.0.1:8546`, chain id `31338`;
-- deploys `HashedTimelock` on both chains;
+- deploys `HashedTimelock` and `Settlement` on both chains;
 - exports safe local `KAEL_*` variables with deterministic Anvil test keys;
 - runs `./scripts/run_closed_testnet_preflight.sh`;
 - runs the closed-testnet swap with the explicit test-funds confirmation;
@@ -109,6 +111,8 @@ Logs are written to:
 /tmp/kael-closed-testnet/anvil-b.log
 /tmp/kael-closed-testnet/deploy-a.log
 /tmp/kael-closed-testnet/deploy-b.log
+/tmp/kael-closed-testnet/deploy-settlement-a.log
+/tmp/kael-closed-testnet/deploy-settlement-b.log
 ```
 
 If cleanup is interrupted, stop only Anvil processes for the local ports:
@@ -124,6 +128,7 @@ kill <pid-for-8545-or-8546>
 - RPC failure: verify the RPC URL and that the private node is running.
 - Chain ID failure: use only local/closed testnet chain IDs allowed by the signer guard; mainnet is refused.
 - HTLC bytecode failure: deploy `HashedTimelock` on that chain and set the resulting `KAEL_HTLC_*`.
+- Settlement bytecode/binding failure: deploy `Settlement` with the canonical HTLC for that chain and set `KAEL_SETTLEMENT_*`.
 - Balance failure: fund the configured test signer with faucet/local test ETH.
 - Cross-chain gas failure: fund both configured signers on both closed-testnet chains; the preflight checks `KAEL_SIGNER_KEY_A` and `KAEL_SIGNER_KEY_B` on both RPCs before any lock.
 - Gas threshold: set `KAEL_MIN_GAS_BALANCE_WEI` when the default local/testnet gas minimum is not appropriate.
@@ -131,4 +136,4 @@ kill <pid-for-8545-or-8546>
 
 ## Current Limits
 
-The closed-testnet runner is a developer-only direct HTLC/native ETH flow. It assumes both developer keys are available to this process and does not include `Settlement`, ERC-20 support, public p2p coordination, fee/RBF policy, multi-RPC quorum, or production restart hardening.
+The closed-testnet runner is a developer-only Settlement-mediated native ETH HTLC flow. It assumes both developer keys are available to this process and does not include ERC-20 support, public p2p coordination, fee/RBF policy, multi-RPC quorum, or production restart hardening.

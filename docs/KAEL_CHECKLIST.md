@@ -17,20 +17,21 @@ Last updated: 2026-06-25
 - Development test runner added at `scripts/run_dev_swap_test.sh`.
 - Development test runbook added at `docs/DEV_TEST_RUNBOOK.md`.
 - Closed developer testnet preflight added at `scripts/run_closed_testnet_preflight.sh`.
-- Closed developer testnet direct HTLC swap runner added at `scripts/run_closed_testnet_swap.sh`.
+- Closed developer testnet swap runner added at `scripts/run_closed_testnet_swap.sh`.
 - Closed developer testnet runbook added at `docs/CLOSED_TESTNET_RUNBOOK.md`.
 - Closed developer testnet UX improved:
   - preflight lists all missing required variables at once;
   - `.env.closed-testnet.example` documents safe local defaults;
-  - `scripts/run_closed_testnet_local.sh` starts two local anvils, deploys HTLCs, runs preflight, runs swap, and cleans up.
+  - `scripts/run_closed_testnet_local.sh` starts two local anvils, deploys HTLCs and Settlements, runs preflight, runs swap, and cleans up.
+- Closed developer testnet runner now locks and refunds through `Settlement` while observing/redeeming the canonical HTLC.
 
 ## Current Milestone
 
-- Peça 5: concluded for local/anvil development scope.
-- Local e2e: concluded for direct HTLC native ETH scope.
+- Piece 5: concluded for local/anvil development scope.
+- Local direct HTLC e2e: concluded as primitive coverage.
 - Development runner: concluded.
 - Closed testnet preflight: concluded for configuration/environment validation.
-- Closed testnet direct HTLC swap runner: concluded for developer-only native ETH HTLC scope.
+- Closed testnet Settlement-mediated swap runner: concluded for developer-only native ETH HTLC scope.
 - Closed local automatic runner: available for two local Anvil chains.
 
 Expected local command:
@@ -42,7 +43,7 @@ Expected local command:
 Expected success marker:
 
 ```text
-Marco de desenvolvimento atingido: swap local rodando pela carteira.
+Development milestone reached: wallet-driven local swap through Settlement.
 ```
 
 Expected closed testnet preflight command:
@@ -94,7 +95,7 @@ Closed developer testnet swap completed.
 - Low: 1 fixed.
   - `KAEL-L-001`: unused orderbook test helper removed.
 - Informational: 1 fixed.
-  - `KAEL-I-001`: Settlement intentionally out of first local executor e2e.
+  - `KAEL-I-001`: Settlement integrated into the closed-testnet runner; direct HTLC remains as primitive coverage.
 
 ## Next Exact Step
 
@@ -127,6 +128,6 @@ cd contracts && forge test
 - Multi-RPC quorum or trustless light-client verification.
 - Persistent crash/restart recovery beyond the simple local executor state.
 - Explicit non-EVM recipient handling before Bitcoin support.
-- Productized closed-testnet flow using p2p/orderbook/Settlement instead of the direct HTLC developer runner.
+- Productized p2p/orderbook flow around the Settlement-mediated closed-testnet runner.
 
 Rule: no mainnet, no real funds, and no weakening of the testnet/local allowlist.

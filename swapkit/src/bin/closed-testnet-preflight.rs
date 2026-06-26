@@ -3,12 +3,12 @@ use alloy::providers::{Provider, ProviderBuilder};
 use alloy::signers::local::PrivateKeySigner;
 use swapkit::exec::signer::assert_chain_allowed;
 
-#[derive(Debug)]
 struct LegConfig {
     name: &'static str,
     rpc: String,
     expected_chain_id: u64,
     htlc: EvmAddress,
+    settlement: EvmAddress,
     key: String,
     amount: Option<U256>,
 }
@@ -27,7 +27,7 @@ impl std::error::Error for PreflightError {}
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
-        eprintln!("ERRO: {e}");
+        eprintln!("ERROR: {e}");
         std::process::exit(1);
     }
 }
@@ -40,7 +40,7 @@ async fn run() -> Result<(), PreflightError> {
 
     if min_confirmations == 0 {
         return Err(PreflightError(
-            "KAEL_CLOSED_TESTNET_MIN_CONFIRMATIONS deve ser >= 1".into(),
+            "KAEL_CLOSED_TESTNET_MIN_CONFIRMATIONS must be >= 1".into(),
         ));
     }
 
@@ -49,8 +49,7 @@ async fn run() -> Result<(), PreflightError> {
 
     if leg_a.expected_chain_id == leg_b.expected_chain_id {
         return Err(PreflightError(
-            "KAEL_CHAIN_A e KAEL_CHAIN_B devem ser chains distintas para o ensaio cross-chain"
-                .into(),
+            "KAEL_CHAIN_A and KAEL_CHAIN_B must be distinct chains for the cross-chain run".into(),
         ));
     }
 
@@ -59,6 +58,8 @@ async fn run() -> Result<(), PreflightError> {
 
     check_leg(&leg_a, &provider_a).await?;
     check_leg(&leg_b, &provider_b).await?;
+    check_settlement(&leg_a, &provider_a).await?;
+    check_settlement(&leg_b, &provider_b).await?;
     check_cross_chain_balances(
         &leg_a,
         &leg_b,
@@ -69,10 +70,10 @@ async fn run() -> Result<(), PreflightError> {
     .await?;
 
     println!("CLOSED TESTNET PREFLIGHT OK");
-    println!("Escopo: testnet fechada de desenvolvedores; sem mainnet; sem fundos reais.");
-    println!("Min confirmations exigidas: {min_confirmations}");
-    println!("Min gas balance exigido por signer/chain: {min_gas_balance_wei} wei");
-    println!("Nenhuma transacao foi assinada ou transmitida.");
+    println!("Scope: closed developer testnet; no mainnet; no real funds.");
+    println!("Required min confirmations: {min_confirmations}");
+    println!("Required min gas balance per signer/chain: {min_gas_balance_wei} wei");
+    println!("No transaction was signed or broadcast.");
     Ok(())
 }
 
@@ -82,20 +83,71 @@ fn read_leg(suffix: &'static str) -> Result<LegConfig, PreflightError> {
         rpc: env_required(&format!("KAEL_RPC_{suffix}"))?,
         expected_chain_id: env_required(&format!("KAEL_CHAIN_{suffix}"))?
             .parse()
-            .map_err(|e| PreflightError(format!("KAEL_CHAIN_{suffix} invalido: {e}")))?,
+            .map_err(|e| PreflightError(format!("KAEL_CHAIN_{suffix} is invalid: {e}")))?,
         htlc: env_required(&format!("KAEL_HTLC_{suffix}"))?
             .parse()
-            .map_err(|e| PreflightError(format!("KAEL_HTLC_{suffix} invalido: {e}")))?,
+            .map_err(|e| PreflightError(format!("KAEL_HTLC_{suffix} is invalid: {e}")))?,
+        settlement: env_required(&format!("KAEL_SETTLEMENT_{suffix}"))?
+            .parse()
+            .map_err(|e| PreflightError(format!("KAEL_SETTLEMENT_{suffix} is invalid: {e}")))?,
         key: env_required(&format!("KAEL_SIGNER_KEY_{suffix}"))?,
         amount: env_u256(&format!("KAEL_AMOUNT_{suffix}_WEI"))?,
     })
+}
+
+async fn check_settlement<P>(config: &LegConfig, provider: &P) -> Result<(), PreflightError>
+where
+    P: Provider,
+{
+    if config.settlement == EvmAddress::ZERO {
+        return Err(PreflightError(format!(
+            "KAEL_SETTLEMENT_{} is invalid: zero address",
+            config.name
+        )));
+    }
+    let chain_id = provider
+        .get_chain_id()
+        .await
+        .map_err(|e| PreflightError(format!("RPC {} failed to read chain_id: {e}", config.name)))?;
+    let code = provider.get_code_at(config.settlement).await.map_err(|e| {
+        PreflightError(format!(
+            "RPC {} failed to read Settlement: {e}",
+            config.name
+        ))
+    })?;
+    if code.is_empty() {
+        return Err(PreflightError(format!(
+            "KAEL_SETTLEMENT_{} has no bytecode on chain {}",
+            config.name, chain_id
+        )));
+    }
+
+    let settlement = swapkit::exec::tx::ISettlementWrite::new(config.settlement, provider);
+    let canonical_htlc = settlement.htlc().call().await.map_err(|e| {
+        PreflightError(format!(
+            "RPC {} failed to read Settlement.htlc(): {e}",
+            config.name
+        ))
+    })?;
+    if canonical_htlc != config.htlc {
+        return Err(PreflightError(format!(
+            "KAEL_SETTLEMENT_{} points to HTLC {}, expected {}",
+            config.name, canonical_htlc, config.htlc
+        )));
+    }
+
+    println!(
+        "Settlement {} OK: settlement={}, htlc={}",
+        config.name, config.settlement, config.htlc
+    );
+    Ok(())
 }
 
 fn provider_for_leg(config: &LegConfig) -> Result<impl Provider, PreflightError> {
     let rpc_url = config
         .rpc
         .parse()
-        .map_err(|e| PreflightError(format!("KAEL_RPC_{} invalido: {e}", config.name)))?;
+        .map_err(|e| PreflightError(format!("KAEL_RPC_{} is invalid: {e}", config.name)))?;
     Ok(ProviderBuilder::new().connect_http(rpc_url))
 }
 
@@ -106,10 +158,10 @@ where
     let chain_id = provider
         .get_chain_id()
         .await
-        .map_err(|e| PreflightError(format!("RPC {} falhou ao ler chain_id: {e}", config.name)))?;
+        .map_err(|e| PreflightError(format!("RPC {} failed to read chain_id: {e}", config.name)))?;
     if chain_id != config.expected_chain_id {
         return Err(PreflightError(format!(
-            "KAEL_CHAIN_{} esperado {}, RPC retornou {}",
+            "KAEL_CHAIN_{} expected {}, RPC returned {}",
             config.name, config.expected_chain_id, chain_id
         )));
     }
@@ -118,10 +170,10 @@ where
     let code = provider
         .get_code_at(config.htlc)
         .await
-        .map_err(|e| PreflightError(format!("RPC {} falhou ao ler HTLC: {e}", config.name)))?;
+        .map_err(|e| PreflightError(format!("RPC {} failed to read HTLC: {e}", config.name)))?;
     if code.is_empty() {
         return Err(PreflightError(format!(
-            "KAEL_HTLC_{} nao tem bytecode na chain {}",
+            "KAEL_HTLC_{} has no bytecode on chain {}",
             config.name, chain_id
         )));
     }
@@ -183,15 +235,15 @@ where
     let balance = provider
         .get_balance(address)
         .await
-        .map_err(|e| PreflightError(format!("RPC {chain_name} falhou ao ler saldo: {e}")))?;
+        .map_err(|e| PreflightError(format!("RPC {chain_name} failed to read balance: {e}")))?;
     if balance < required {
         return Err(PreflightError(format!(
-            "saldo insuficiente para gas/valor: signer {signer_name} na chain {chain_name} tem {balance} wei, requerido {required} wei"
+            "insufficient gas/value balance: signer {signer_name} on chain {chain_name} has {balance} wei, required {required} wei"
         )));
     }
 
     println!(
-        "Saldo OK: signer {signer_name} na chain {chain_name}, address={address}, balance={balance} wei, required={required} wei"
+        "Balance OK: signer {signer_name} on chain {chain_name}, address={address}, balance={balance} wei, required={required} wei"
     );
     Ok(())
 }
@@ -203,11 +255,11 @@ fn signer_for_leg(config: &LegConfig) -> Result<PrivateKeySigner, PreflightError
         .strip_prefix("0x")
         .unwrap_or(config.key.trim())
         .parse()
-        .map_err(|e| PreflightError(format!("KAEL_SIGNER_KEY_{} invalido: {e}", config.name)))
+        .map_err(|e| PreflightError(format!("KAEL_SIGNER_KEY_{} is invalid: {e}", config.name)))
 }
 
 fn env_required(name: &str) -> Result<String, PreflightError> {
-    std::env::var(name).map_err(|_| PreflightError(format!("variavel obrigatoria ausente: {name}")))
+    std::env::var(name).map_err(|_| PreflightError(format!("missing required variable: {name}")))
 }
 
 fn env_u64(name: &str) -> Result<Option<u64>, PreflightError> {
@@ -215,9 +267,9 @@ fn env_u64(name: &str) -> Result<Option<u64>, PreflightError> {
         Ok(v) => v
             .parse()
             .map(Some)
-            .map_err(|e| PreflightError(format!("{name} invalido: {e}"))),
+            .map_err(|e| PreflightError(format!("{name} is invalid: {e}"))),
         Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(e) => Err(PreflightError(format!("{name} invalido: {e}"))),
+        Err(e) => Err(PreflightError(format!("{name} is invalid: {e}"))),
     }
 }
 
@@ -225,8 +277,8 @@ fn env_u256(name: &str) -> Result<Option<U256>, PreflightError> {
     match std::env::var(name) {
         Ok(v) => U256::from_str_radix(v.trim(), 10)
             .map(Some)
-            .map_err(|e| PreflightError(format!("{name} invalido: {e}"))),
+            .map_err(|e| PreflightError(format!("{name} is invalid: {e}"))),
         Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(e) => Err(PreflightError(format!("{name} invalido: {e}"))),
+        Err(e) => Err(PreflightError(format!("{name} is invalid: {e}"))),
     }
 }

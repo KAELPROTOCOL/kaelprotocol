@@ -1,128 +1,107 @@
-# Kael — Estado do Projeto
+# Kael - Project State
 
-> Estado honesto do que existe, do que foi decidido mas não construído, e do que
-> está em aberto. Números de teste são **reais** (de `forge test` e
-> `cargo test --workspace`), não estimados.
+> Honest state of what exists, what has been decided but not built, and what
+> remains open. Test counts are real outputs from `forge test` and
+> `cargo test --workspace`, not estimates.
 >
-> Regra inviolável: nada toca fundos reais antes de auditoria profissional
-> independente. Tudo abaixo é experimental, não-auditado, testnet/local.
+> Non-negotiable rule: no real funds before an independent professional audit.
+> Everything below is experimental, unaudited, and local/closed-testnet only.
 
 ---
 
-## 1. CONSTRUÍDO E TESTADO
+## 1. Built And Tested
 
-**Total: 135 testes passando, 0 ignorados** (36 Foundry + 99 Rust).
+**Total: 135 passing tests, 0 ignored** (36 Foundry + 99 Rust).
 
-### Contratos (Foundry) — 36 testes
-| Suíte | Testes | Cobre |
-|---|---|---|
-| `HashedTimelock.t.sol` | 9 | HTLC: trava/resgate/reembolso, preimage errado, duplo resgate, resgate após expiração, guardas de criação |
-| `Order.t.sol` | 10 | EIP-712: assinatura válida/inválida/expirada, endurecimento ECDSA (s alto, v inválido, comprimento, signer zero) |
-| `Settlement.t.sol` | 16 | liquidação Abordagem A: autorização+nonce, binding de chain, maker-only (ETH+ERC-20), replay, reembolso ao maker, não-custódia |
-| `Vector.t.sol` | 1 | gera o vetor de equivalência EIP-712 on-chain/off-chain |
+### Contracts (Foundry) - 36 tests
 
-### `orderbook` (Rust) — 26 testes
-- `lib` (25): matching puro price-time, verificação EIP-712 (equivalência com o contrato, provada por vetor), livro em memória + ingestão verificada na borda, e **price-time no caminho SERVIDO** (`matches_for` ordena por melhor preço; fonte única de ranking em `matching::cmp_makers_for_taker`).
-- `server_integration` (1): servidor HTTP real — ingestão verificada + consulta de matches.
+| Suite | Tests | Coverage |
+|---|---:|---|
+| `HashedTimelock.t.sol` | 9 | HTLC lock/redeem/refund, wrong preimage, double redeem, redeem after expiry, creation guards |
+| `Order.t.sol` | 10 | EIP-712 valid/invalid/expired signatures and ECDSA hardening |
+| `Settlement.t.sol` | 16 | Approach A settlement: authorization+nonce, chain binding, maker-only ETH/ERC-20 paths, replay, maker refund, non-custody |
+| `Vector.t.sol` | 1 | Emits the on-chain/off-chain EIP-712 equivalence vector |
 
-### `maestro` (Rust) — 9 testes
-- `lib` (6): hashlock SHA-256 (fonte única) + correlação por hashlock e watchdog.
-- `e2e` (2): dois anvils, deploy do HTLC, swap correlacionado + preimage capturado; watchdog de expiração.
-- `full_flow` (1): capstone livro→liquidação→maestro.
+### `orderbook` (Rust) - 26 tests
 
-### `swapkit` (Rust) — 64 testes, 0 ignorados
-- `verify` (19): verificador de perna oposta (hashlock/token/amount/recipient + gap de timelock assimétrico por papel) **+ janela de relógio absoluta**: a perna oposta não pode expirar em menos de `now + min_gap` — fecha o vetor de "segredo revelado contra perna prestes a expirar".
-- `sm` (11): máquina de estados interativa (jornadas taker/maker, testes críticos de segurança incl. o do relógio absoluto, reembolsos, transições inválidas).
-- `chain` (8): mapeamento Swap→ObservedLock (`exists` = trava ativa) + junção com a verificação + **integração REAL contra anvil** (sobe nó, deploy do HTLC, `newSwap`, leitura via `RpcVerifier`, e a junção leitura→verificação→decisão da máquina de estados). O antigo stub `#[ignore]` foi **implementado**.
-- `handshake` (5): **atribuição DETERMINÍSTICA de papéis** (Taker/Maker) + derivação do `SwapContext`, PURA (recebe as duas ordens como input, agnóstica ao transporte). Regra: repouso (menor `created_at`) = Maker; quem cruza = Taker; empate → menor digest EIP-712 = Maker. Provas: papéis complementares dos dois lados (incl. desempate por digest) e **divergência de papel NÃO perde fundos** (ambos-Maker → swap não inicia; ambos-Taker → Unsafe/`TimelockInverted` → segredo nunca revelado → refund).
-- `exec` (19): signer com allowlist local/testnet, envio de `lock`/`redeem`/`refund`, observação por hashlock, confirmação por profundidade, executor `step()`/`run()` com relógio injetável e re-verificação anti-TOCTOU. Inclui e2e local com dois anvils e dois executores: Taker lock → Maker lock → Taker redeem → Maker aprende segredo → Maker redeem.
+- `lib` (25): pure price-time matching, EIP-712 verification equivalence with the
+  contract, in-memory book, verified edge ingestion, and served price-time ranking.
+- `server_integration` (1): real HTTP server with verified ingestion and match
+  queries.
 
----
+### `maestro` (Rust) - 9 tests
 
-## 2. DECIDIDO, NÃO CONSTRUÍDO
+- `lib` (6): SHA-256 hashlock source, hashlock correlation, and watchdog.
+- `e2e` (2): two anvils, HTLC deployment, correlated swap, captured preimage, and
+  expiry watchdog.
+- `full_flow` (1): capstone orderbook to settlement to maestro flow.
 
-Decisões já tomadas, mas ainda sem implementação:
+### `swapkit` (Rust) - 64 tests, 0 ignored
 
-- **Transporte das ordens na liquidação = PEER-TO-PEER (não via livro).** A regra
-  de papéis e o `SwapContext` (em `swapkit/src/handshake.rs`) já estão prontos e são
-  **agnósticos ao transporte** — recebem as duas ordens completas como input. A
-  decisão de COMO a carteira obtém a ordem completa da contraparte: **p2p, as
-  carteiras trocam direto entre si**, NÃO um `GET /orders/{hash}` no livro. Razão:
-  o livro fica só para **descoberta** (anunciar/casar); a partir do match, a
-  liquidação é interativa e **trustless**, sem o servidor no caminho crítico. Em
-  ambos os casos a carteira **re-verifica a assinatura EIP-712 da contraparte por
-  conta própria** (inegociável — nunca confiar no que recebeu). O **canal p2p em si
-  não está construído** (é a próxima peça; mais trabalho que o GET, adiado de
-  propósito). `GET /orders/{hash}` foi **rejeitado** como acoplamento ao servidor.
-- **Dívida conhecida: recipients assumem MESMA CHAVE nas duas chains (EVM↔EVM).**
-  Em `handshake::derive_context`, o recipient de uma perna = o endereço do maker da
-  ordem oposta (mesma chave EVM nas duas chains). Vale em EVM↔EVM, mas **QUEBRA no
-  Bitcoin**: a perna Bitcoin exigirá um recipient **EXPLÍCITO** (não derivável do
-  endereço EVM). Registrado no código e aqui — não é suposição silenciosa.
-- **Política de timelock por chain (calibração).** `TimelockPolicy`
-  (taker longo / maker curto / `min_gap`) é uma constante de protocolo compartilhada;
-  os VALORES por chain ainda não estão calibrados (ver o acoplamento abaixo).
-- **Profundidade de confirmação (anti-reorg).** `ChainVerifier::observe_lock` hoje lê
-  o estado "agora", sem exigir N confirmações. Para a perna oposta, observar uma
-  trava que depois é revertida por reorg é um risco real. Decidido que precisa de uma
-  profundidade mínima de confirmação antes de considerar uma trava "observada";
-  **não implementado** (provavelmente um parâmetro da verificação/`ChainVerifier`).
-- **Quórum de nós.** O `RpcVerifier` confia num único nó. Reforço barato antes do
-  SPV completo: consultar múltiplos nós e exigir concordância. Decidido como direção;
-  **não implementado**.
-- **⚠️ LIVENESS DE TX PERTO DA EXPIRAÇÃO (taxa/RBF) — fora do MVP, OBRIGATÓRIO antes
-  de testnet pública.** Uma transação **subprecificada** (resgate ou reembolso) pode
-  ficar **presa na mempool** e não minerar a tempo. Se isso acontece **perto da
-  expiração do timelock**, a parte **perde a janela de resgate** — risco de liveness
-  REAL, com perda de fundos como consequência (a contraparte reembolsa; eu fico sem o
-  resgate). O executor do MVP usa estimativa de gás default do nó, **sem
-  replace-by-fee**, **sem retentativa com bump de taxa** — aceitável **só em anvil**
-  (mineração determinística, sem mempool competitiva). Para qualquer chain pública,
-  uma **política de taxa + RBF** (bump progressivo até minerar, com margem antes da
-  expiração) é **necessária, não opcional**. Decidido como direção; **não
-  implementado** e **não pode ir a testnet pública sem isso**.
-- **Acoplamento de fundação a calibrar por chain.** `min_gap` (gap de timelock),
-  **profundidade de confirmação** e **tempo de bloco da chain** são **acoplados**: o
-  gap seguro depende de quantos blocos/quanto tempo a parte precisa para agir após a
-  revelação, que por sua vez depende do tempo de bloco e da profundidade exigida.
-  Esses três devem ser **calibrados juntos, por chain** — ainda não há tabela de
-  valores nem método de calibração.
+- `verify` (19): counterparty-leg verification for hashlock, token, amount,
+  recipient, asymmetric role timelock gap, and the absolute `now + min_gap`
+  window.
+- `sm` (11): interactive taker/maker state machine, critical safety tests,
+  refunds, and invalid transitions.
+- `chain` (8): `Swap` to `ObservedLock` mapping, verification join, and real
+  anvil integration.
+- `handshake` (5): deterministic Taker/Maker role assignment and pure
+  `SwapContext` derivation.
+- `exec` (19): signer allowlist, `lock`/`redeem`/`refund` sends, hashlock
+  observation, confirmation depth, injected clock, and anti-TOCTOU re-checks.
+  Includes a direct HTLC local e2e over two anvils; the closed local runner now
+  locks/refunds through `Settlement` while observing and redeeming through the
+  canonical HTLC.
 
 ---
 
-## 3. ABERTO / A CONSTRUIR
+## 2. Decided, Not Built
 
-- ~~**O executor.**~~ **FEITO para o escopo local/anvil direto HTLC.** A camada pega
-  a `NextAction` da máquina de estados, re-observa, re-verifica e só então envia
-  `lock`/`redeem`/`refund`. Continua fora do escopo: produção, mainnet, fundos reais,
-  fee bump/RBF e recuperação persistente completa.
-- **Integração ponta a ponta completa.** Livro → match → handshake p2p → executor →
-  chains ainda não está todo costurado. O marco local atual cobre dois executores
-  diretos sobre HTLC nativo em duas chains anvil.
-- ~~**Teste de integração real contra anvil.**~~ **FEITO.**
-  `swapkit/src/chain.rs::rpc_verifier_reads_real_chain_and_drives_wallet` sobe
-  anvil, faz deploy do HTLC, cria a trava, lê via `RpcVerifier` e ainda junta
-  leitura→verificação→decisão da máquina de estados. Não é mais `#[ignore]`. O que
-  permanece aberto aqui é a **profundidade de confirmação** (anti-reorg) na leitura.
-- **A perna Bitcoin.** O diferencial central e a parte mais difícil. A leitura
-  trustless do Bitcoin (SPV/prova de inclusão) é um projeto próprio ("Keystone"). A
-  escolha de SHA-256 (ADR-001) mantém essa porta aberta, mas a fundação do Bitcoin
-  ainda está por fechar.
-- **Modelo econômico de incentivo de liquidez.** "Por que prover liquidez?" e a
-  mitigação econômica do free-option (que recai sobre o taker — ADR-014). Em direção,
-  não calibrado nem implementado.
-- **Auditoria profissional independente.** Inviolável antes de qualquer valor real.
-  Nada aqui foi auditado.
+- **Settlement order transport is peer-to-peer, not through the orderbook.** The
+  role rule and `SwapContext` are transport-agnostic and already exist in
+  `swapkit/src/handshake.rs`. The wallet must obtain the full counterparty order
+  through a p2p channel and independently re-verify the EIP-712 signature. That
+  p2p channel is not built yet.
+- **Known debt: EVM recipients currently assume the same key on both chains.**
+  This is acceptable for EVM-to-EVM, but Bitcoin will require an explicit
+  non-EVM recipient.
+- **Per-chain timelock policy calibration.** `TimelockPolicy` exists as shared
+  protocol logic, but final per-chain values are not calibrated.
+- **Confirmation depth against reorgs.** `ChainVerifier::observe_lock` reads
+  current state. A minimum confirmation depth is required before public use.
+- **Multi-node quorum.** `RpcVerifier` trusts one node. Public use needs multiple
+  nodes or trustless verification.
+- **Transaction liveness near expiry.** The MVP uses node-default gas estimation
+  and has no RBF or fee-bump policy. That is acceptable only on deterministic
+  local anvil chains.
+- **Cross-chain parameter coupling.** Timelock gap, confirmation depth, and block
+  time must be calibrated together per chain.
 
 ---
 
-## Resumo dos números (reais)
+## 3. Open Work
 
-```
-Foundry  : 36 testes  (HashedTimelock 9, Order 10, Settlement 16, Vector 1)
-orderbook: 26 testes  (lib 25 + integração 1)
-maestro  :  9 testes  (lib 6 + e2e 2 + full_flow 1)
-swapkit  : 64 testes  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 19, incl. anvil real)
+- ~~**Executor.**~~ Built for the local/anvil direct HTLC scope and now used by
+  the closed local Settlement runner.
+- **Complete product path.** Orderbook match to p2p handshake to executor to
+  chains is not fully wired.
+- ~~**Real anvil integration test.**~~ Built in
+  `swapkit/src/chain.rs::rpc_verifier_reads_real_chain_and_drives_wallet`; the
+  remaining gap is confirmation-depth hardening.
+- **Native Bitcoin.** SHA-256 keeps the path open, but Bitcoin SPV/inclusion
+  verification remains separate work.
+- **Liquidity incentives and maker economics.**
+- **Independent professional audit.** Required before any real value.
+
+---
+
+## Test Count Summary
+
+```text
+Foundry  : 36 tests  (HashedTimelock 9, Order 10, Settlement 16, Vector 1)
+orderbook: 26 tests  (lib 25 + integration 1)
+maestro  :  9 tests  (lib 6 + e2e 2 + full_flow 1)
+swapkit  : 64 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 19, incl. real anvil)
 ---------------------------------------------------------------
-TOTAL    : 135 passando, 0 ignorados
+TOTAL    : 135 passing, 0 ignored
 ```

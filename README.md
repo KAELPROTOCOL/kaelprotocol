@@ -1,127 +1,126 @@
-# Kael — Protocolo de Swap Atômico Cross-Chain (MVP EVM↔EVM)
+# Kael - Cross-Chain Atomic Swap Protocol (EVM-to-EVM MVP)
 
-Protocolo de swap atômico **não-custodial**. As peças centrais (HTLC, ordem
-assinada, livro, liquidador, verificação de carteira) existem e são testadas —
-inclusive a leitura de chain **contra um nó real (anvil)**. O fluxo ponta a ponta
-conduzido por executor local direto HTLC já existe para o teste de desenvolvimento
-(ver `docs/DEV_TEST_RUNBOOK.md` e `docs/ESTADO.md`).
+Kael is a non-custodial atomic swap protocol. The core pieces exist and are
+tested: HTLC, signed orders, orderbook, Settlement, and wallet-side verification,
+including chain reads against a real local node (`anvil`). The direct HTLC local
+executor path exists for the development test, and the closed testnet runner now
+locks through Settlement (see `docs/DEV_TEST_RUNBOOK.md` and `docs/ESTADO.md`).
 
-> **Regra inviolável:** nada toca fundos reais antes de auditoria profissional
-> independente. Todo este código é experimental, não-auditado, para testnet/local.
+> **Non-negotiable rule:** no real funds before an independent professional
+> audit. All code here is experimental, unaudited, and intended only for
+> local/closed-testnet use.
 
-## Componentes
+## Components
 
-| # | Componente | Onde | Estado |
-|---|-----------|------|--------|
-| 1 | HTLC (`HashedTimelock.sol`) | `contracts/` | ✅ 9 testes |
-| 2 | Ordem assinada EIP-712 (`Order.sol`) | `contracts/` | ✅ 10 testes |
-| 3 | Liquidador (`Settlement.sol`) | `contracts/` | ✅ 16 testes |
-| 4 | Matching + servidor do livro | `orderbook/` | ✅ 26 testes |
-| 5 | Maestro (observador/correlação) | `maestro/` | ✅ 9 testes (2 anvils) |
-| 6 | Swapkit (verificação + máquina de estados + executor local) | `swapkit/` | ✅ 64 testes (incl. anvil real + e2e executor) |
+| # | Component | Location | Status |
+|---|-----------|----------|--------|
+| 1 | HTLC (`HashedTimelock.sol`) | `contracts/` | 9 tests |
+| 2 | EIP-712 signed order (`Order.sol`) | `contracts/` | 10 tests |
+| 3 | Settlement (`Settlement.sol`) | `contracts/` | 16 tests |
+| 4 | Matching + orderbook server | `orderbook/` | 26 tests |
+| 5 | Maestro observer/correlation | `maestro/` | 9 tests (2 anvils) |
+| 6 | Swapkit verification + state machine + local executor | `swapkit/` | 64 tests (real anvil + executor e2e) |
 
-**Total: 135 testes verdes, 0 ignorados** (36 Foundry + 99 Rust).
+**Total: 135 passing tests, 0 ignored** (36 Foundry + 99 Rust).
 
-> **Honestidade sobre o estado (leia `docs/ESTADO.md`):** os componentes acima
-> são provados *isoladamente* e em algumas junções reais (livro→match;
-> trava→correlação no maestro; leitura-de-chain→verificação→decisão no swapkit
-> contra anvil; executor local direto HTLC em duas chains anvil). O que **ainda NÃO
-> existe**: (a) transporte p2p de liquidação; (b) costura completa livro→match→p2p
-> handshake→executor; (c) `Settlement` ↔ carteira num fluxo único. O executor local
-> é um marco de desenvolvimento, não prontidão para fundos reais.
+> **State honesty:** the pieces above are proven in isolation and in selected
+> real joins: orderbook match, HTLC lock correlation in maestro, chain read to
+> verification to decision in swapkit against anvil, direct HTLC executor over
+> two anvil chains, and the closed local runner through Settlement. Still missing:
+> public p2p settlement transport and the complete product path from orderbook
+> match to p2p handshake to executor. This is a development milestone, not real
+> fund readiness.
 
-## Invariantes de fundação
+## Foundation Invariants
 
-1. **SHA-256 no hashlock** (não keccak256) — verificável também em Bitcoin Script.
-   Fonte única em Solidity (`sha256`) e Rust (`maestro::hashlock`). ADR-001.
-2. **Domínio EIP-712 chain-agnóstico** — sem `chainId`/`verifyingContract`; o
-   binding de chain vive no payload assinado. ADR-005.
-3. **Equivalência on-chain/off-chain** — a verificação EIP-712 em Rust recupera
-   exatamente o mesmo maker que o `Order.sol`, provado por vetor fixo
-   (`vectors/eip712_order.json`).
-4. **Não-custódia** — servidor, maestro e `Settlement` nunca movem, congelam ou
-   priorizam fundos a favor de terceiros. No pior caso, param; o reembolso vai
-   sempre ao maker.
-5. **Matching neutro** — função pura, price-time determinístico, `now` é
-   parâmetro — e o caminho **servido** pelo livro respeita essa ordem (ADR-004).
-6. **HTLC canônico no liquidador** — o `Settlement` trava só no HTLC fixado no
-   deploy (imutável), nunca num endereço fornecido na chamada.
-7. **Segurança de timelock relativa E absoluta** — a carteira só age contra a
-   perna oposta se o gap inter-pernas E a janela de relógio (`now + min_gap`)
-   forem seguros; o segredo nunca vaza contra uma perna prestes a expirar.
+1. **SHA-256 hashlock** (not keccak256), so the same preimage can be verified by
+   Bitcoin Script. Single source in Solidity (`sha256`) and Rust
+   (`maestro::hashlock`). ADR-001.
+2. **Chain-agnostic EIP-712 domain** with no `chainId` or `verifyingContract`;
+   chain binding lives in the signed payload. ADR-005.
+3. **On-chain/off-chain equivalence**: Rust EIP-712 verification recovers the same
+   maker as `Order.sol`, proven by `vectors/eip712_order.json`.
+4. **Non-custody**: the server, maestro, and `Settlement` never move, freeze, or
+   prioritize funds for third parties. At worst they stop; refunds go back to the
+   maker.
+5. **Neutral matching**: pure deterministic price-time matching; `now` is an
+   input, and the served orderbook path preserves that ranking. ADR-004.
+6. **Canonical HTLC in Settlement**: `Settlement` only locks into the HTLC fixed
+   at deployment, never into a caller-supplied address.
+7. **Relative and absolute timelock safety**: the wallet only acts if both the
+   inter-leg gap and `now + min_gap` window are safe; the secret is never leaked
+   against a leg that is about to expire.
 
-## Estrutura
+## Layout
 
-```
+```text
 kael/
 ├── contracts/                 Foundry (Solidity)
-│   ├── src/HashedTimelock.sol  trava/resgata/reembolsa (SHA-256)
-│   ├── src/Order.sol           OrderLib EIP-712 chain-agnóstico
-│   ├── src/Settlement.sol      liga ordem assinada ↔ HTLC (Abordagem A)
+│   ├── src/HashedTimelock.sol  lock/redeem/refund (SHA-256)
+│   ├── src/Order.sol           chain-agnostic EIP-712 OrderLib
+│   ├── src/Settlement.sol      signed order to HTLC bridge (Approach A)
 │   └── test/                   HashedTimelock.t, Order.t, Settlement.t, Vector.t
-├── orderbook/                 Crate Rust
-│   ├── src/order.rs            ordem do livro (espelha Order.sol + created_at)
-│   ├── src/matching.rs         matching puro price-time (fonte única do ranking)
-│   ├── src/eip712.rs           verificação EIP-712 em Rust (== Order.sol) + sign
-│   ├── src/book.rs             estado em memória + ingestão verificada na borda
+├── orderbook/                 Rust crate
+│   ├── src/order.rs            orderbook order model
+│   ├── src/matching.rs         pure price-time matching
+│   ├── src/eip712.rs           Rust EIP-712 verification/signing
+│   ├── src/book.rs             in-memory state + verified ingestion
 │   ├── src/server.rs           HTTP (axum): POST /orders, GET /matches
-│   └── tests/                  integração HTTP
-├── maestro/                   Crate Rust
-│   ├── src/hashlock.rs         fonte única do hashlock SHA-256
-│   ├── src/correlate.rs        SwapTracker — correlação + watchdog
-│   ├── src/watcher.rs          observação on-chain (alloy)
+│   └── tests/                  HTTP integration
+├── maestro/                   Rust crate
+│   ├── src/hashlock.rs         single SHA-256 hashlock source
+│   ├── src/correlate.rs        SwapTracker correlation + watchdog
+│   ├── src/watcher.rs          on-chain observation (alloy)
 │   └── tests/                  e2e (2 anvils) + full_flow
-├── swapkit/                   Crate Rust (a carteira/SDK)
-│   ├── src/verify.rs           verificação da perna oposta (gap + janela de relógio)
-│   ├── src/sm.rs               máquina de estados interativa (decide, não executa)
-│   ├── src/chain.rs            leitura de chain (RpcVerifier) + teste real anvil
+├── swapkit/                   Rust wallet/SDK crate
+│   ├── src/verify.rs           counterparty-leg verification
+│   ├── src/sm.rs               interactive state machine
+│   ├── src/chain.rs            chain reads + real anvil test
 │   └── ...
-└── vectors/eip712_order.json  vetor de equivalência on-chain/off-chain
+└── vectors/eip712_order.json  on-chain/off-chain EIP-712 vector
 ```
 
-## Como rodar os testes
+## Run Tests
 
 ```bash
-# Contratos (camadas 1–3)
+# Contracts (layers 1-3)
 cd contracts && forge test
 
-# Rust (camadas 4–6) — e2e/anvil sobem nós locais automaticamente
+# Rust (layers 4-6); e2e tests start local anvils automatically
 cd .. && cargo test --workspace
 
-# Marco local de desenvolvimento: dois executores, dois anvils, HTLC direto
+# Development milestone: direct HTLC primitive + closed Settlement flow
 ./scripts/run_dev_swap_test.sh
 
-# Preflight para testnet fechada de desenvolvedores (nao envia transacoes)
+# Closed developer testnet preflight; sends no transactions
 ./scripts/run_closed_testnet_preflight.sh
 
-# Swap direto HTLC em testnet fechada (exige confirmacao explicita por env)
-./scripts/run_closed_testnet_swap.sh
+# Closed testnet Settlement swap; requires explicit env confirmation
+KAEL_CLOSED_TESTNET_SEND_TX=I_UNDERSTAND_THIS_USES_TEST_FUNDS ./scripts/run_closed_testnet_swap.sh
 ```
 
-## Como rodar os serviços
+## Run Services
 
 ```bash
-# Servidor do livro
+# Orderbook server
 KAEL_BIND=127.0.0.1:8080 cargo run -p orderbook --bin orderbook-server
 
-# Maestro (observa duas chains)
-KAEL_RPC_A=http://127.0.0.1:8545 KAEL_CHAIN_A=1 KAEL_HTLC_A=0x... \
-KAEL_RPC_B=http://127.0.0.1:8546 KAEL_CHAIN_B=10 KAEL_HTLC_B=0x... \
+# Maestro observing two test chains
+KAEL_RPC_A=http://127.0.0.1:8545 KAEL_CHAIN_A=31337 KAEL_HTLC_A=0x... \
+KAEL_RPC_B=http://127.0.0.1:8546 KAEL_CHAIN_B=31338 KAEL_HTLC_B=0x... \
 cargo run -p maestro --bin maestro
 ```
 
-## Fora do escopo deste MVP (fundação em aberto)
+## Out Of Scope For This MVP
 
-Honestamente não construídos — têm decisões de fundação a fechar antes de codar
-(detalhe em `docs/ESTADO.md`):
+These items are intentionally not built yet:
 
-- **Transporte p2p + integração completa com livro/Settlement** — a costura de
-  produto que transforma descoberta de match em swap conduzido ponta a ponta.
-- **Execução pública/produção** — há preflight e runner direto HTLC para testnet
-  fechada de desenvolvedores (`docs/CLOSED_TESTNET_RUNBOOK.md`), mas isso não é
-  prontidão para público, mainnet ou fundos reais.
-- **Quórum de nós na leitura de chain.**
-- **Liquidez/makers** — o *free-option problem* e o incentivo de liquidez.
-- **Bitcoin nativo** (a SHA-256 mantém essa porta aberta) e Solana.
-- **Auditoria profissional independente** — inviolável antes de qualquer valor real.
-```
+- **p2p transport and complete orderbook/Settlement integration**: the product
+  path from match discovery to end-to-end swap execution.
+- **Public or production execution**: the closed developer testnet has preflight
+  and a Settlement-mediated runner, but this is not public, mainnet, or real-fund
+  readiness.
+- **Multi-node read quorum.**
+- **Liquidity and maker incentives**, including free-option economics.
+- **Native Bitcoin** and Solana.
+- **Independent professional audit**, which is required before any real value.
