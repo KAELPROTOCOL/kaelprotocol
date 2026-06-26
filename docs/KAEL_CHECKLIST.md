@@ -24,6 +24,7 @@ Last updated: 2026-06-25
   - `.env.closed-testnet.example` documents safe local defaults;
   - `scripts/run_closed_testnet_local.sh` starts two local anvils, deploys HTLCs and Settlements, runs preflight, runs swap, and cleans up.
 - Closed developer testnet runner now locks and refunds through `Settlement` while observing/redeeming the canonical HTLC.
+- Settlement mainnet-readiness coverage added for HTLC contractId binding of recipient/hashlock/timelock and rollback on invalid zero amount/hashlock/timelock legs.
 
 ## Current Milestone
 

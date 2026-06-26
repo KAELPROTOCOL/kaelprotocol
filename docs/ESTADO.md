@@ -11,15 +11,15 @@
 
 ## 1. Built And Tested
 
-**Total: 135 passing tests, 0 ignored** (36 Foundry + 99 Rust).
+**Total: 139 passing tests, 0 ignored** (40 Foundry + 99 Rust).
 
-### Contracts (Foundry) - 36 tests
+### Contracts (Foundry) - 40 tests
 
 | Suite | Tests | Coverage |
 |---|---:|---|
 | `HashedTimelock.t.sol` | 9 | HTLC lock/redeem/refund, wrong preimage, double redeem, redeem after expiry, creation guards |
 | `Order.t.sol` | 10 | EIP-712 valid/invalid/expired signatures and ECDSA hardening |
-| `Settlement.t.sol` | 16 | Approach A settlement: authorization+nonce, chain binding, maker-only ETH/ERC-20 paths, replay, maker refund, non-custody |
+| `Settlement.t.sol` | 20 | Approach A settlement: authorization+nonce, chain binding, maker-only ETH/ERC-20 paths, replay, maker refund, non-custody, HTLC contractId binding for recipient/hashlock/timelock, and invalid local leg rollback |
 | `Vector.t.sol` | 1 | Emits the on-chain/off-chain EIP-712 equivalence vector |
 
 ### `orderbook` (Rust) - 26 tests
@@ -98,10 +98,10 @@
 ## Test Count Summary
 
 ```text
-Foundry  : 36 tests  (HashedTimelock 9, Order 10, Settlement 16, Vector 1)
+Foundry  : 40 tests  (HashedTimelock 9, Order 10, Settlement 20, Vector 1)
 orderbook: 26 tests  (lib 25 + integration 1)
 maestro  :  9 tests  (lib 6 + e2e 2 + full_flow 1)
 swapkit  : 64 tests  (verify 19 + sm 11 + chain 10 + handshake 5 + exec 19, incl. real anvil)
 ---------------------------------------------------------------
-TOTAL    : 135 passing, 0 ignored
+TOTAL    : 139 passing, 0 ignored
 ```
