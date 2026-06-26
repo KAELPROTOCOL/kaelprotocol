@@ -56,7 +56,7 @@ async fn cross_chain_swap_is_correlated_and_preimage_captured() {
     let hashlock_b = B256::from(hashlock);
     let preimage_b = B256::from(preimage);
     let amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
-                                                            // timelock longo em A, curto em B (assimetria correta do HTLC)
+                                                            // long timelock on A, short on B
     let timelock_a = U256::from(now_unix() + 7200);
     let timelock_b = U256::from(now_unix() + 3600);
 
@@ -144,7 +144,7 @@ async fn watchdog_detects_expired_swap() {
     let hashlock = hashlock_from_preimage(&preimage);
     let hashlock_b = B256::from(hashlock);
     let amount = U256::from(500_000_000_000_000_000u128);
-    let timelock = now_unix() + 30; // curto
+    let timelock = now_unix() + 30; // short
 
     htlc_a
         .newSwap(

@@ -21,9 +21,7 @@ impl std::fmt::Display for ChainError {
 }
 impl std::error::Error for ChainError {}
 
-///
-/// - [`Confirmed`](LockObservation::Confirmed): trava ativa E suficientemente
-///
+/// Observation status for an HTLC lock after applying confirmation depth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LockObservation {
     Confirmed(ObservedLock),
@@ -74,7 +72,7 @@ pub struct RawSwap {
 
 /// Pure Swap to ObservedLock mapping.
 ///
-/// MODELAGEM DE `exists`: reportamos `exists = true` apenas para uma trava
+/// `exists` is true only for an active lock.
 pub fn observed_from_swap(s: &RawSwap) -> ObservedLock {
     let active = s.sender != [0u8; 20] && !s.withdrawn && !s.refunded;
     ObservedLock {
@@ -148,10 +146,8 @@ fn u256_to_u64(v: U256) -> Result<u64, ChainError> {
 }
 
 impl RpcVerifier {
-    /// Bloco em que a trava `contract_id` foi CRIADA, lido do `LogNewSwap`
-    /// (filtrado pelo `contractId` indexado). `None` se nenhum log for achado.
-    ///
-    /// rastrear a partir de um checkpoint evita a varredura completa.
+    /// Block where `contract_id` was created, read from indexed `LogNewSwap`.
+    /// Returns `None` when no matching log is found.
     async fn creation_block(
         &self,
         htlc_address: Address,
@@ -247,7 +243,7 @@ mod tests {
         }
     }
 
-    // --- mapeamento: campos certos para uma trava ativa ---
+    // --- mapping: correct fields for an active lock ---
     #[test]
     fn maps_active_swap_fields() {
         let o = observed_from_swap(&active_swap());
@@ -260,7 +256,7 @@ mod tests {
         assert_eq!(o.sender, a(0x3A));
     }
 
-    // --- exists = false: trava inexistente (sender zero) ---
+    // --- exists = false: nonexistent lock (zero sender) ---
     #[test]
     fn nonexistent_swap_is_not_exists() {
         let mut s = active_swap();
@@ -356,7 +352,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // Esta prova sobe anvil, faz deploy do HTLC, cria uma trava de verdade, e:
+    // This proof starts Anvil, deploys the HTLC, creates a real lock, and:
     // ----------------------------------------------------------------
     use crate::sm::{next_action, NextAction, SwapContext, SwapState};
     use alloy::network::EthereumWallet;
@@ -430,7 +426,7 @@ mod tests {
             other => panic!("esperava Confirmed da chain real, veio {other:?}"),
         };
 
-        assert!(obs.exists, "trava ativa lida da chain real");
+        assert!(obs.exists, "active lock read from the real chain");
         assert_eq!(obs.hashlock, hashlock);
         assert_eq!(obs.amount, amount_u128);
         assert_eq!(obs.recipient, me);

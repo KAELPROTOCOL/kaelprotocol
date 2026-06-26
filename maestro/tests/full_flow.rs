@@ -115,10 +115,10 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
     let hashlock = hashlock_from_preimage(&preimage);
     let hl = B256::from(hashlock);
     let amount = U256::from(1_000_000_000_000_000_000u128);
-    let tl_a = U256::from(now_unix() + 7200); // longo em A
-    let tl_b = U256::from(now_unix() + 3600); // curto em B
+    let tl_a = U256::from(now_unix() + 7200); // long on A
+    let tl_b = U256::from(now_unix() + 3600); // short on B
 
-    // trava em A (recipiente = parte B)
+    // Lock on A, recipient is party B.
     htlc_a
         .newSwap(wallet_b, Address::ZERO, amount, hl, tl_a)
         .value(amount)
@@ -128,7 +128,7 @@ async fn mvp_orderbook_to_settlement_to_maestro() {
         .get_receipt()
         .await
         .unwrap();
-    // trava em B (recipiente = parte A), mesmo hashlock
+    // Lock on B, recipient is party A, same hashlock.
     htlc_b
         .newSwap(wallet_a, Address::ZERO, amount, hl, tl_b)
         .value(amount)

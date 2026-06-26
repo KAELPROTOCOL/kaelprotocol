@@ -1,29 +1,27 @@
-//!
-//! sem estado.
+//! Counterparty-leg verification for the atomic swap wallet.
 
 use serde::{Deserialize, Serialize};
 
 pub type Address = [u8; 20];
 
-///
-/// - `Maker`  = respondente; trava DEPOIS e com timelock MENOR (curto).
+/// Swap role used for asymmetric timelock checks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Role {
     Taker,
     Maker,
 }
 
-/// Uma trava HTLC lida da outra chain (o que um leitor de chain reportaria).
+/// HTLC lock observed on the other chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedLock {
     pub hashlock: [u8; 32],
     pub token: Address,
     pub amount: u128,
-    /// quem pode resgatar com o preimage.
+    /// Recipient allowed to redeem with the preimage.
     pub recipient: Address,
     pub timelock: u64,
     pub sender: Address,
-    /// a trava foi encontrada on-chain?
+    /// Whether the lock was found on-chain.
     pub exists: bool,
 }
 

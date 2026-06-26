@@ -3,13 +3,13 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LegKind {
-    /// Perna observada na chain A (primeira a aparecer para um dado hashlock).
+    /// First observed leg for a given hashlock.
     First,
-    /// Perna observada na chain B (segunda a aparecer).
+    /// Second observed leg for a given hashlock.
     Second,
 }
 
-/// Uma trava HTLC observada numa chain.
+/// HTLC lock observed on one chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Leg {
     pub chain_id: u64,
@@ -167,12 +167,12 @@ mod tests {
         let hashlock = hashlock_from_preimage(&preimage);
 
         let mut t = SwapTracker::new();
-        // trava na chain A
+        // lock on chain A
         assert_eq!(
             t.on_new_swap(1, cid(0xA1), hashlock, 1000, 100),
             LegKind::First
         );
-        // trava na chain B, mesmo hashlock
+        // lock on chain B, same hashlock
         assert_eq!(
             t.on_new_swap(10, cid(0xB1), hashlock, 900, 200),
             LegKind::Second

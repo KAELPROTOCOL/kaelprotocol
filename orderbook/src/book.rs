@@ -1,13 +1,11 @@
-//!
-//!   estiveram aqui).
-//!   como novos esquemas sem refatorar o livro.
+//! In-memory orderbook state with verified ingestion at the boundary.
 
 use crate::eip712::{self, VerifyError};
 use crate::matching;
 use crate::order::{Address, Order};
 use std::collections::HashSet;
 
-/// Solana entram como novas impls sem mexer no resto do livro.
+/// Signature verification scheme used before accepting an order.
 pub trait SignatureVerifier: Send + Sync {
     fn verify(&self, order: &Order, signature: &[u8], now: u64) -> Result<[u8; 32], VerifyError>;
 }

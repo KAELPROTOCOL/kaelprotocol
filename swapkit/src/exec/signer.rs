@@ -192,7 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn forbidden_chain_yields_err_never_signer() {
-        // anvil LOCAL, mas se passando pelo chain-id 1 (Ethereum L1 mainnet).
+        // Local Anvil pretending to be chain-id 1 (Ethereum L1 mainnet).
         let anvil = Anvil::new().chain_id(1).spawn();
         let r = Signer::from_key_str(ANVIL_KEY0, &anvil.endpoint()).await;
         assert_eq!(

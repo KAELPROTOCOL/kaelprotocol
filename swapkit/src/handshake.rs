@@ -1,15 +1,9 @@
-//! do [`SwapContext`] a partir de um par de ordens casadas. PURO: sem rede, sem
+//! Deterministic Taker/Maker role assignment and `SwapContext` derivation from
+//! matched orders. Pure logic only: no network, clock, or randomness.
 //!
-//! protected role, short timelock, responds. The crossing order with larger
-//! `created_at` is Taker and carries the free-option. Time ties are broken by
-//! signed data.
-//!
-//!
-//!
-//! ## Modelo B (transporte do hashlock)
-//! recebido bate com o `hashlock` da trava OBSERVADA **antes** de o Maker travar
-//!
-//! Os recipients assumem a **MESMA CHAVE nas duas chains** (o recipient de uma
+//! The resting order is Maker and uses the short timelock. The crossing order is
+//! Taker, generates the secret, locks first, uses the long timelock, and carries
+//! the free-option. Time ties are broken by signed order digest.
 
 use crate::sm::SwapContext;
 use crate::verify::Role;
@@ -44,13 +38,14 @@ pub fn assign_role(order_self: &Order, order_cp: &Order) -> Role {
     }
 }
 
+/// Derive this wallet's `SwapContext` from the matched orders, assigned role,
+/// hashlock/secret material, timelock policy, and current time.
 ///
-/// MATERIAL DE HASHLOCK por papel:
-/// - **Taker**: `hashlock = Some(H)`, `secret = Some(s)` com `H = SHA256(s)` (o
-///   mora aqui).
-/// - **Maker**: `hashlock = Some(H)` (recebido via Modelo B), `secret = None`.
+/// Role-specific hashlock material:
+/// - Taker: `hashlock = Some(H)`, `secret = Some(s)` with `H = SHA256(s)`.
+/// - Maker: `hashlock = Some(H)`, `secret = None`.
 ///
-/// Os campos observacionais (`my_leg_locked`, `counterparty_lock`,
+/// Observation fields start empty and are filled by the executor.
 pub fn derive_context(
     order_self: &Order,
     order_cp: &Order,
@@ -61,8 +56,8 @@ pub fn derive_context(
     now: u64,
 ) -> SwapContext {
     let my_lock = match role {
-        Role::Taker => policy.taker_lock_secs, // longo
-        Role::Maker => policy.maker_lock_secs, // curto
+        Role::Taker => policy.taker_lock_secs,
+        Role::Maker => policy.maker_lock_secs,
     };
     SwapContext {
         role,
@@ -185,7 +180,7 @@ mod tests {
         assert_ne!(ctx.cp_amount, a.buy_amount, "not my buy_amount");
         assert_eq!(ctx.my_recipient, b.maker, "my leg pays the counterparty");
         assert_eq!(ctx.me, a.maker, "I redeem the opposite leg");
-        // maker = timelock curto
+        // maker uses the short timelock
         assert_eq!(ctx.my_timelock, 1000 + 3600);
         assert_eq!(ctx.min_gap, 1800);
         assert!(ctx.secret.is_none(), "maker does not have the secret");

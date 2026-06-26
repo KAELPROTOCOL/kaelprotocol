@@ -62,7 +62,7 @@ pub fn domain_separator() -> [u8; 32] {
     keccak(&buf)
 }
 
-/// keccak(abi.encode(ORDER_TYPEHASH, ...campos...))
+/// keccak(abi.encode(ORDER_TYPEHASH, ...fields...))
 pub fn hash_struct(o: &Order) -> [u8; 32] {
     let mut buf = Vec::with_capacity(32 * 10);
     buf.extend_from_slice(&order_typehash());
