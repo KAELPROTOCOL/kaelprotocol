@@ -126,6 +126,32 @@ pgrep -af anvil
 kill <pid-for-8545-or-8546>
 ```
 
+## 4. Mainnet-Like Private Testnet Gate
+
+Use this before audit handoff or when validating a larger local/private flow:
+
+```bash
+./scripts/run_private_testnet_full.sh
+```
+
+The script writes logs to `/tmp/kael-private-testnet-full/` and:
+
+- starts two local private Anvil chains;
+- deploys `HashedTimelock`, `Settlement`, and test `MockERC20` tokens on both chains;
+- validates chain IDs, bytecode, cross-chain gas, native balances, ERC-20 balances, allowances, and confirmation settings;
+- runs preflight without broadcasting;
+- runs the direct HTLC native primitive test as base coverage;
+- runs the guarded Settlement native swap;
+- mints local test ERC-20 balances and runs the guarded Settlement ERC-20 swap;
+- verifies post-swap ERC-20 allowances are zero;
+- proves expected operational failures for missing send confirmation and invalid token bytecode.
+
+Passing output includes:
+
+```text
+PRIVATE TESTNET FULL PASS
+```
+
 ## Interpreting Failures
 
 - Missing variables: the preflight lists all missing required variables and prints a copy/paste example.
@@ -140,4 +166,4 @@ kill <pid-for-8545-or-8546>
 
 ## Current Limits
 
-The closed-testnet runner is a developer-only Settlement-mediated HTLC flow. It defaults to native ETH and can use ERC-20 token legs when `KAEL_TOKEN_A/B` point to token contracts with sufficient test balances. It assumes both developer keys are available to this process and does not include public p2p coordination, fee/RBF policy, multi-RPC quorum, or production restart hardening.
+The closed-testnet runner is a developer-only Settlement-mediated HTLC flow. It defaults to native ETH and can use ERC-20 token legs when `KAEL_TOKEN_A/B` point to token contracts with sufficient test balances. The private-testnet full runner exercises both native and ERC-20 Settlement paths on local/private chains. These runners assume both developer keys are available to this process and do not include public p2p coordination, fee/RBF policy, multi-RPC quorum, or production restart hardening.

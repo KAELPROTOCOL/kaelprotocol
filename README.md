@@ -92,6 +92,9 @@ cd .. && cargo test --workspace
 # Development milestone: direct HTLC primitive + closed Settlement flow
 ./scripts/run_dev_swap_test.sh
 
+# Mainnet-like private testnet audit gate; local/private chains only
+./scripts/run_private_testnet_full.sh
+
 # Closed developer testnet preflight; sends no transactions
 ./scripts/run_closed_testnet_preflight.sh
 
@@ -118,8 +121,8 @@ These items are intentionally not built yet:
 - **p2p transport and complete orderbook/Settlement integration**: the product
   path from match discovery to end-to-end swap execution.
 - **Public or production execution**: the closed developer testnet has preflight
-  and a Settlement-mediated runner, but this is not public, mainnet, or real-fund
-  readiness.
+  plus private-testnet mainnet-like validation, but this is not public, mainnet,
+  production, or real-fund readiness.
 - **Multi-node read quorum.**
 - **Liquidity and maker incentives**, including free-option economics.
 - **Native Bitcoin** and Solana.

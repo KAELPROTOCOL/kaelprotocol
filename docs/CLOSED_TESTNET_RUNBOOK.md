@@ -85,6 +85,27 @@ Passing output includes:
 Closed developer testnet swap completed.
 ```
 
+## Mainnet-Like Private Testnet
+
+For the broader local/private audit gate:
+
+```bash
+./scripts/run_private_testnet_full.sh
+```
+
+This starts two private local chains, deploys `HashedTimelock`, `Settlement`,
+and test `MockERC20` tokens, validates bytecode, chain IDs, gas, native balances,
+ERC-20 balances, allowances, and confirmations, runs preflight, runs the direct
+HTLC native primitive test, runs Settlement native and Settlement ERC-20 swaps,
+and verifies expected operational failures. Logs are written to
+`/tmp/kael-private-testnet-full/`.
+
+Passing output includes:
+
+```text
+PRIVATE TESTNET FULL PASS
+```
+
 ## What Preflight Checks
 
 - required tools exist;
@@ -94,9 +115,11 @@ Closed developer testnet swap completed.
 - the two legs are on distinct chains;
 - configured HTLC addresses have bytecode;
 - configured Settlement addresses have bytecode and point to the configured HTLC;
+- configured ERC-20 token addresses have bytecode when `KAEL_TOKEN_A/B` are nonzero;
 - configured signer keys are valid;
 - both configured signers have native gas on both chains before any lock is sent;
 - the signer locking value on each chain also has enough balance for the configured amount when `KAEL_AMOUNT_A_WEI` / `KAEL_AMOUNT_B_WEI` are set.
+- the signer locking an ERC-20 leg has enough test token balance for the configured amount.
 
 ## Passing Output
 
@@ -114,4 +137,4 @@ CLOSED TESTNET SWAP OK
 
 ## Remaining Limits
 
-Closed testnet is still a developer-only milestone. The runner is Settlement-mediated HTLC, defaults to native ETH, and can use ERC-20 token legs when `KAEL_TOKEN_A/B` point to token contracts with sufficient test balances. It assumes both developer keys are available to this process. Before public testnet or any real funds, Kael still needs fee/RBF policy, per-chain timelock and confirmation calibration, multi-RPC quorum or trustless verification, persistence/restart hardening, and professional independent audit.
+Closed testnet is still a developer-only milestone. The runner is Settlement-mediated HTLC, defaults to native ETH, and can use ERC-20 token legs when `KAEL_TOKEN_A/B` point to token contracts with sufficient test balances. The private-testnet full runner provides mainnet-like local/private validation but is not production readiness. It assumes both developer keys are available to this process. Before public testnet or any real funds, Kael still needs fee/RBF policy, per-chain timelock and confirmation calibration, multi-RPC quorum or trustless verification, persistence/restart hardening, and professional independent audit.

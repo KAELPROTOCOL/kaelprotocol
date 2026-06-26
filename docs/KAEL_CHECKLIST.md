@@ -26,6 +26,7 @@ Last updated: 2026-06-25
 - Closed developer testnet runner now locks and refunds through `Settlement` while observing/redeeming the canonical HTLC.
 - Settlement mainnet-readiness coverage added for HTLC contractId binding of recipient/hashlock/timelock and rollback on invalid zero amount/hashlock/timelock legs.
 - ERC-20 hardening added for exact allowance in the executor plus EOA-token and insufficient-allowance rejection in contracts.
+- Mainnet-like private testnet runner added at `scripts/run_private_testnet_full.sh`, with native Settlement, ERC-20 Settlement, direct HTLC primitive coverage, bytecode/gas/balance/allowance checks, and expected operational failures.
 
 ## Current Milestone
 
@@ -35,6 +36,7 @@ Last updated: 2026-06-25
 - Closed testnet preflight: concluded for configuration/environment validation.
 - Closed testnet Settlement-mediated swap runner: concluded for developer-only native ETH HTLC scope.
 - Closed local automatic runner: available for two local Anvil chains.
+- Mainnet-like private testnet runner: available for local/private audit-gate validation; not mainnet and not real funds.
 
 Expected local command:
 
@@ -84,6 +86,18 @@ Expected automatic local closed testnet marker:
 Closed developer testnet swap completed.
 ```
 
+Expected mainnet-like private testnet command:
+
+```bash
+./scripts/run_private_testnet_full.sh
+```
+
+Expected mainnet-like private testnet marker:
+
+```text
+PRIVATE TESTNET FULL PASS
+```
+
 ## Audit Findings
 
 - Critical: 0 open.
@@ -111,6 +125,12 @@ For the closed developer testnet local path, run:
 
 ```bash
 ./scripts/run_closed_testnet_local.sh
+```
+
+For the broader local/private audit gate, run:
+
+```bash
+./scripts/run_private_testnet_full.sh
 ```
 
 For broader validation, run:

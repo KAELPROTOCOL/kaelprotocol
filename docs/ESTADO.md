@@ -6,6 +6,8 @@
 >
 > Non-negotiable rule: no real funds before an independent professional audit.
 > Everything below is experimental, unaudited, and local/closed-testnet only.
+> `scripts/run_private_testnet_full.sh` adds a mainnet-like private validation
+> gate, but it is still local/private testnet only.
 
 ---
 
@@ -52,6 +54,11 @@
   Includes a direct HTLC local e2e over two anvils; the closed local runner now
   locks/refunds through `Settlement` while observing and redeeming through the
   canonical HTLC, including an ERC-20 Settlement lock with exact allowance.
+- `scripts/run_private_testnet_full.sh`: local/private mainnet-like gate that
+  deploys HTLC, Settlement, and ERC-20 test tokens; validates chain IDs,
+  bytecode, gas, balances, allowances, and confirmations; runs direct HTLC
+  primitive coverage; runs native and ERC-20 Settlement swaps; and checks
+  expected operational failures.
 
 ---
 
