@@ -103,6 +103,14 @@ cd .. && cargo test --workspace
 KAEL_CLOSED_TESTNET_SEND_TX=I_UNDERSTAND_THIS_USES_TEST_FUNDS ./scripts/run_closed_testnet_swap.sh
 ```
 
+## Professional Audit Package
+
+The audit handoff entrypoint is `docs/AUDIT_PACKAGE.md`. It links the
+architecture, threat model, invariants, trust assumptions, private testnet
+runbook, incident response, test matrix, known limitations, and remaining
+mainnet-readiness gaps. This package is for external audit reproduction only; it
+does not approve production, mainnet, or real funds.
+
 ## Run Services
 
 ```bash

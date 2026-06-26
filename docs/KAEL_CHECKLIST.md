@@ -31,6 +31,7 @@ Last updated: 2026-06-25
 - Fuzz and property coverage added in `contracts/test/MainnetReadinessFuzz.t.sol` and `swapkit/tests/mainnet_readiness_properties.rs`.
 - Defensive hardening added to redact secrets from `NextAction` debug output and remove `Debug` from `SwapContext`.
 - Internal audit report, findings register, and risk register added in `docs/INTERNAL_AUDIT_REPORT.md`, `docs/FINDINGS_REGISTER.md`, and `docs/RISK_REGISTER.md`.
+- Professional audit readiness package added in `docs/AUDIT_PACKAGE.md`, with architecture, threat model, invariants, assumptions, runbooks, incident response, test matrix, known limitations, and mainnet gap documents.
 
 ## Current Milestone
 
@@ -42,6 +43,7 @@ Last updated: 2026-06-25
 - Closed local automatic runner: available for two local Anvil chains.
 - Mainnet-like private testnet runner: available for local/private audit-gate validation; not mainnet and not real funds.
 - Internal audit package: available for professional audit handoff; not production approval.
+- Professional audit package: available for external auditor reproduction; not production approval.
 
 Expected local command:
 
